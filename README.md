@@ -60,7 +60,7 @@ git clone https://github.com/Eason4869/astrbot_plugin_PlayStationGames.git
 
 本插件通过 PSNAWP 访问 PlayStation Network，**必须**配置一个有效的 NPSSO 令牌（64 位字符）：
 
-1. 用浏览器登录 [PlayStation 官网](https://www.playstation.com/) 或 [my.account.sony.com](https://my.account.sony.com/)；
+1. 用浏览器登录 [PlayStation 官网](https://www.playstation.com/) ；
 2. 确保你能正常访问 [`https://ca.account.sony.com/api/v1/ssocookie`](https://ca.account.sony.com/api/v1/ssocookie)；
 3. 页面会返回类似 `{"npsso":"xxxxxxxx...（64 位字符）..."}` 的内容，复制其中的字符串；
 4. 在 AstrBot 插件配置中粘贴到 **NPSSO 令牌** 项。
