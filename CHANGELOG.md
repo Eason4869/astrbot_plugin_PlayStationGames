@@ -7,8 +7,7 @@
 ## v1.0.1
 
 - 修复：`html_render` 误传模板文件路径导致返回白图（仅显示路径文字）的问题，改为传入模板内容；
-- 调整：`/psn启用`、`/psn禁用` 使用 `PermissionType.ADMIN` 装饰器，默认仅管理员可调用；
-- 调整：插件显示名称改为「PlayStation玩家数据」。
+- 调整：`/psn启用`、`/psn禁用` 使用 `PermissionType.ADMIN` 装饰器，默认仅管理员可调用。
 
 ## v1.0.0
 
