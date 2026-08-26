@@ -48,8 +48,8 @@ ONLINE_STATUS_TEXT = {
 @register(
     "astrbot_plugin_PlayStationGames",
     "Eason4869",
-    "PlayStation (PSN) 玩家数据可视化：绑定、游戏库、游戏时间、奖杯、群排行",
-    "1.0.0",
+    "PlayStation玩家数据 — 绑定PSN账号，查询游戏库/游戏时间/奖杯、群内排行与对比（图片可视化）",
+    "1.0.1",
     "https://github.com/Eason4869/astrbot_plugin_PlayStationGames",
 )
 class PlayStationGamesPlugin(Star):
@@ -257,8 +257,10 @@ class PlayStationGamesPlugin(Star):
 
     async def _render(self, template_name: str, data: Dict[str, Any], width: int = 820) -> str:
         path = TEMPLATES_DIR / template_name
+        # html_render 第一个参数需要模板「内容字符串」，而不是文件路径
+        template_content = path.read_text(encoding="utf-8")
         return await self.html_render(
-            str(path),
+            template_content,
             data,
             options={
                 "width": width,
@@ -288,13 +290,11 @@ class PlayStationGamesPlugin(Star):
 
     # -------------------- 群组开关 --------------------
 
+    @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("psn启用", prefix_optional=True)
     async def cmd_enable(self, event: AstrMessageEvent):
         """管理员：在当前群启用 PSN 插件。"""
         self._log_usage(event, "psn启用")
-        if not self._is_admin(event):
-            yield event.plain_result("该指令需要管理员权限。")
-            return
         gid = str(event.get_group_id() or "")
         if not gid:
             yield event.plain_result("请在群聊中使用该指令。")
@@ -306,13 +306,11 @@ class PlayStationGamesPlugin(Star):
         self._save_enabled_groups()
         yield event.plain_result("✅ 已在本群启用 PSN 插件，使用 /psn帮助 查看指令。")
 
+    @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("psn禁用", prefix_optional=True)
     async def cmd_disable(self, event: AstrMessageEvent):
         """管理员：在当前群禁用 PSN 插件。"""
         self._log_usage(event, "psn禁用")
-        if not self._is_admin(event):
-            yield event.plain_result("该指令需要管理员权限。")
-            return
         gid = str(event.get_group_id())
         if gid in self._enabled_groups:
             self._enabled_groups.discard(gid)
