@@ -49,7 +49,7 @@ ONLINE_STATUS_TEXT = {
     "astrbot_plugin_PlayStationGames",
     "Eason4869",
     "PlayStation玩家数据 — 绑定PSN账号，查询游戏库/游戏时间/奖杯、群内排行与对比（图片可视化）",
-    "1.0.1",
+    "1.0.2",
     "https://github.com/Eason4869/astrbot_plugin_PlayStationGames",
 )
 class PlayStationGamesPlugin(Star):
@@ -349,7 +349,7 @@ class PlayStationGamesPlugin(Star):
             "——————————————\n"
             "首次使用请先 /绑定psn 你的PSN ID。"
         )
-        yield event.plain_result(help_text)
+        yield event.plain_result(help_text).use_t2i(False)
 
     # -------------------- 绑定 --------------------
 
