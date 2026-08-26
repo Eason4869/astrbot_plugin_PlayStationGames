@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+    background:linear-gradient(135deg,#0b1a3a,#0a0f1f 55%,#1a1033);color:#fff;width:820px;padding:32px;}
+  .wrap{display:flex;flex-direction:column;gap:20px;}
+  .title{font-size:24px;font-weight:800;text-align:center;}
+  .sub{text-align:center;color:#9fb0d6;font-size:13px;margin-top:-10px;}
+  .section{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);border-radius:18px;padding:20px;}
+  .stitle{font-size:15px;color:#9fb0d6;letter-spacing:1px;margin-bottom:14px;}
+  .pair{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.06);font-size:14px;}
+  .pair:last-child{border-bottom:none;}
+  .heart{color:#f87171;}
+  .shared-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;}
+  .card{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);border-radius:12px;overflow:hidden;}
+  .cover{width:100%;height:100px;object-fit:cover;background:#1a2240;display:block;}
+  .cinfo{padding:8px;}
+  .cname{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .crow{display:flex;justify-content:space-between;font-size:11px;color:#9fb0d6;margin-top:4px;}
+  .empty{color:#9fb0d6;font-size:13px;text-align:center;padding:14px;}
+  .footer{text-align:center;color:#5d6b8c;font-size:11px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div>
+    <div class="title">🕸️ 群内 PSN 联动</div>
+    <div class="sub">基于 {{ member_count }} 位群友数据分析</div>
+  </div>
+
+  <div class="section">
+    <div class="stitle">互为 PSN 好友（{{ friend_count }} 对）</div>
+    {% if friend_pairs %}
+      {% for a,b in friend_pairs %}
+      <div class="pair"><span class="heart">❤</span><span>{{ a }}</span><span style="color:#5d6b8c">↔</span><span>{{ b }}</span></div>
+      {% endfor %}
+    {% else %}
+      <div class="empty">暂未发现群友之间的 PSN 好友关系（部分账号私密也会导致无法检测）。</div>
+    {% endif %}
+  </div>
+
+  <div class="section">
+    <div class="stitle">大家都在玩的游戏（共同拥有 {{ shared_count }} 款）</div>
+    {% if shared_games %}
+    <div class="shared-grid">
+      {% for g in shared_games %}
+      <div class="card">
+        {% if g.image_uri %}<img class="cover" src="{{ g.image_uri }}">{% else %}<div class="cover"></div>{% endif %}
+        <div class="cinfo">
+          <div class="cname" title="{{ g.name }}">{{ g.name }}</div>
+          <div class="crow"><span>{{ g.owners_count }} 人拥有</span><span>{{ g.total_time_str }}</span></div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty">群友之间暂时没有共同拥有的 PS4/PS5 游戏记录。</div>
+    {% endif %}
+  </div>
+
+  <div class="footer">PlayStation Network · 群联动分析</div>
+</div>
+</body>
+</html>

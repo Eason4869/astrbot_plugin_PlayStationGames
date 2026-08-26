@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing:border-box; margin:0; padding:0;}
+  body {
+    font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+    background:linear-gradient(135deg,#0b1a3a,#0a0f1f 60%,#1a1033);
+    color:#fff; width:820px; padding:32px;
+  }
+  .wrap { display:flex; flex-direction:column; gap:16px;}
+  .head { text-align:center; }
+  .title { font-size:26px; font-weight:800; letter-spacing:1px;}
+  .sub { color:#9fb0d6; font-size:13px; margin-top:6px;}
+  .list { display:flex; flex-direction:column; gap:10px;}
+  .row {
+    display:flex; align-items:center; gap:14px;
+    background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08);
+    border-radius:16px; padding:12px 16px;
+  }
+  .row.rank-1 { background:linear-gradient(90deg, rgba(247,200,115,0.22), rgba(255,255,255,0.04)); border-color:rgba(247,200,115,0.5);}
+  .row.rank-2 { background:linear-gradient(90deg, rgba(203,213,225,0.18), rgba(255,255,255,0.04)); border-color:rgba(203,213,225,0.4);}
+  .row.rank-3 { background:linear-gradient(90deg, rgba(217,119,6,0.2), rgba(255,255,255,0.04)); border-color:rgba(217,119,6,0.45);}
+  .rk { width:42px; text-align:center; font-size:22px; font-weight:800; color:#9fb0d6; flex-shrink:0;}
+  .rank-1 .rk { color:#f7c873;} .rank-2 .rk { color:#cbd5e1;} .rank-3 .rk { color:#d97706;}
+  .avatar { width:48px; height:48px; border-radius:50%; object-fit:cover; background:#222; flex-shrink:0;}
+  .meta { flex:1; min-width:0;}
+  .name { font-size:16px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .mini { display:flex; gap:10px; margin-top:6px;}
+  .mini img { width:30px; height:30px; border-radius:6px; object-fit:cover;}
+  .metric { text-align:right;}
+  .mv { font-size:22px; font-weight:800; color:#4da3ff;}
+  .ml { font-size:11px; color:#9fb0d6;}
+  .trophy-badges { font-size:12px; color:#b9c4e0; margin-top:4px;}
+  .footer { text-align:center; color:#5d6b8c; font-size:11px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">
+    <div class="title">🏆 {{ title }}</div>
+    <div class="sub">共统计 {{ member_count }} 位群友</div>
+  </div>
+  <div class="list">
+    {% for r in rows %}
+    <div class="row rank-{{ r.rank }}">
+      <div class="rk">{{ r.rank }}</div>
+      {% if r.avatar_uri %}<img class="avatar" src="{{ r.avatar_uri }}">{% else %}<div class="avatar"></div>{% endif %}
+      <div class="meta">
+        <div class="name">{{ r.online_id }}</div>
+        <div class="mini">
+          {% for g in r.top_games %}{% if g.image_uri %}<img src="{{ g.image_uri }}" title="{{ g.name }} · {{ g.play_time_str }}">{% endif %}{% endfor %}
+        </div>
+      </div>
+      <div class="metric">
+        {% if dimension == 'time' %}
+          <div class="mv">{{ r.total_time_str }}</div>
+          <div class="ml">{{ r.game_count }} 款游戏</div>
+        {% elif dimension == 'count' %}
+          <div class="mv">{{ r.game_count }}</div>
+          <div class="ml">款游戏 · {{ r.total_time_str }}</div>
+        {% elif dimension == 'trophy' %}
+          <div class="mv">{{ r.trophy_score }}</div>
+          <div class="ml">奖杯总分 · Lv.{{ r.trophy_level }}</div>
+        {% elif dimension == 'platinum' %}
+          <div class="mv">🏆 {{ r.platinum }}</div>
+          <div class="ml">白金杯</div>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="footer">PlayStation Network · 群内排行榜</div>
+</div>
+</body>
+</html>

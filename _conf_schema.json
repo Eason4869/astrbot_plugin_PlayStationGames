@@ -1,0 +1,44 @@
+{
+    "npsso_token": {
+        "description": "PSN 的 NPSSO 令牌（64 位）",
+        "type": "string",
+        "hint": "必填。浏览器登录 https://my.account.sony.com/ 后访问 https://ca.account.sony.com/api/v1/ssocookie 复制 npsso 的值（约 64 位字符，有效期约几个月，过期后需重新获取）。",
+        "obvious_hint": true
+    },
+    "enabled_groups": {
+        "description": "启用插件的群聊名单（群号列表）",
+        "type": "list",
+        "hint": "只在这些群聊中响应 PSN 查询指令。也可在群内用 /psn启用（需管理员）动态添加。留空列表表示不限制（所有群聊均启用，不推荐）。",
+        "default": []
+    },
+    "proxy": {
+        "description": "HTTP/HTTPS 代理（如 http://127.0.0.1:7890）",
+        "type": "string",
+        "hint": "可选。若服务器直连 PlayStation Network 不稳定，可在此填写代理。PSNAWP 与图片下载均会使用。",
+        "default": ""
+    },
+    "image_quality": {
+        "description": "渲染图片质量（10-100）",
+        "type": "int",
+        "default": 90,
+        "hint": "数值越大越清晰，图片体积也越大。"
+    },
+    "cache_ttl": {
+        "description": "数据缓存时间（秒）",
+        "type": "int",
+        "default": 300,
+        "hint": "个人资料/游戏库/奖杯等数据在内存中的缓存时长，减少 PSN 请求、加快重复查询。"
+    },
+    "max_titles": {
+        "description": "游戏库/排行最多统计的游戏数量",
+        "type": "int",
+        "default": 200,
+        "hint": "PSN 游戏时间接口分页返回，数值越大统计越全但越慢。排行统计会按此数量截断。"
+    },
+    "command_prefix": {
+        "description": "指令前缀（如 / 或 !）",
+        "type": "string",
+        "default": "/",
+        "hint": "指令将以 前缀+指令名 触发，例如 /psn。prefix_optional 已开启，无前缀通常也能触发。"
+    }
+}

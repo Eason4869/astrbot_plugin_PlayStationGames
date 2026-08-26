@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body {
+    font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+    background:linear-gradient(135deg,#1a1033,#0a0f1f 55%,#0b1a3a);
+    color:#fff; width:880px; padding:34px;
+  }
+  .wrap { display:flex; flex-direction:column; gap:20px; }
+  .head { display:flex; align-items:center; gap:18px; }
+  .avatar { width:66px; height:66px; border-radius:50%; border:2px solid #fff; object-fit:cover; background:#222;}
+  .title { font-size:25px; font-weight:800; }
+  .sub { color:#9fb0d6; font-size:13px; margin-top:4px; }
+  .level-badge {
+    margin-left:auto; text-align:center;
+    background:linear-gradient(135deg,#f7c873,#e8a33d); color:#3a2400;
+    border-radius:16px; padding:10px 20px; font-weight:800;
+  }
+  .level-badge .lv { font-size:28px; line-height:1; }
+  .level-badge .lb { font-size:11px; }
+  .summary { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+  .scard { background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.08);
+    border-radius:14px; padding:14px; text-align:center; }
+  .scard .e { font-size:24px; }
+  .scard .n { font-size:20px; font-weight:800; margin-top:2px;}
+  .scard .l { font-size:11px; color:#b9c4e0; }
+  .section-title { font-size:15px; color:#9fb0d6; letter-spacing:1px; margin-bottom:12px; }
+  .list { display:flex; flex-direction:column; gap:10px; }
+  .row {
+    display:flex; align-items:center; gap:14px;
+    background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08);
+    border-radius:14px; padding:10px 14px;
+  }
+  .icon { width:54px; height:54px; border-radius:8px; object-fit:cover; background:#222;}
+  .meta { flex:1; min-width:0; }
+  .gname { font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .gplat { font-size:11px; color:#9fb0d6; margin-top:3px;}
+  .counts { display:flex; gap:10px; font-size:12px;}
+  .counts span { white-space:nowrap;}
+  .plat-c { color:#e5e7eb;} .gold-c { color:#fbbf24;} .sil-c { color:#cbd5e1;} .brz-c { color:#d97706;}
+  .progress-wrap { width:150px; text-align:right;}
+  .pbar { height:7px; background:rgba(255,255,255,0.12); border-radius:999px; overflow:hidden;}
+  .pfill { height:100%; background:linear-gradient(90deg,#7c3aed,#c084fc);}
+  .ptxt { font-size:11px; color:#9fb0d6; margin-top:4px;}
+  .footer { text-align:center; color:#5d6b8c; font-size:11px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">
+    {% if avatar_uri %}<img class="avatar" src="{{ avatar_uri }}">{% else %}<div class="avatar"></div>{% endif %}
+    <div>
+      <div class="title">{{ online_id }} 的奖杯</div>
+      <div class="sub">共在 {{ total_trophy_games }} 款游戏中获得过奖杯{% if show_all_note %}，展示进度最高的 {{ titles|length }} 款{% endif %}</div>
+    </div>
+    {% if summary and not summary.private %}
+    <div class="level-badge"><div class="lv">{{ summary.level or 0 }}</div><div class="lb">奖杯等级</div></div>
+    {% endif %}
+  </div>
+
+  {% if summary and not summary.private and summary.earned %}
+  <div class="summary">
+    <div class="scard"><div class="e">🏆</div><div class="n" style="color:#e5e7eb">{{ summary.earned.platinum }}</div><div class="l">白金</div></div>
+    <div class="scard"><div class="e">🥇</div><div class="n" style="color:#fbbf24">{{ summary.earned.gold }}</div><div class="l">金</div></div>
+    <div class="scard"><div class="e">🥈</div><div class="n" style="color:#cbd5e1">{{ summary.earned.silver }}</div><div class="l">银</div></div>
+    <div class="scard"><div class="e">🥉</div><div class="n" style="color:#d97706">{{ summary.earned.bronze }}</div><div class="l">铜</div></div>
+  </div>
+  {% endif %}
+
+  <div>
+    <div class="section-title">游戏奖杯进度</div>
+    <div class="list">
+      {% for t in titles %}
+      <div class="row">
+        {% if t.icon_uri %}<img class="icon" src="{{ t.icon_uri }}">{% else %}<div class="icon"></div>{% endif %}
+        <div class="meta">
+          <div class="gname" title="{{ t.title_name }}">{{ t.title_name }}</div>
+          <div class="gplat">{{ t.platforms_str }}</div>
+        </div>
+        <div class="counts">
+          {% if t.earned.platinum %}<span class="plat-c">🏆{{ t.earned.platinum }}</span>{% endif %}
+          <span class="gold-c">🥇{{ t.earned.gold }}</span>
+          <span class="sil-c">🥈{{ t.earned.silver }}</span>
+          <span class="brz-c">🥉{{ t.earned.bronze }}</span>
+        </div>
+        <div class="progress-wrap">
+          <div class="pbar"><div class="pfill" style="width:{{ t.progress or 0 }}%"></div></div>
+          <div class="ptxt">{{ t.earned_total }}/{{ t.defined_total }} · {{ t.progress or 0 }}%</div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="footer">PlayStation Trophies · 数据由 PSNAWP 提供</div>
+</div>
+</body>
+</html>

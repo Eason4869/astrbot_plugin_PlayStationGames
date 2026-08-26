@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+    background:linear-gradient(135deg,#0b1a3a,#0a0f1f 55%,#1a1033);color:#fff;width:860px;padding:32px;}
+  .wrap{display:flex;flex-direction:column;gap:18px;}
+  .vs{display:flex;align-items:center;gap:16px;}
+  .player{flex:1;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);
+    border-radius:20px;padding:20px;text-align:center;}
+  .avatar{width:84px;height:84px;border-radius:50%;border:3px solid #fff;object-fit:cover;background:#222;}
+  .pname{font-size:18px;font-weight:700;margin-top:10px;word-break:break-all;}
+  .vs-badge{font-size:26px;font-weight:900;color:#4da3ff;}
+  .metrics{display:grid;grid-template-columns:1fr 140px 1fr;gap:10px;align-items:center;}
+  .metric-label{grid-column:1 / -1;text-align:center;color:#9fb0d6;font-size:13px;letter-spacing:1px;margin-top:6px;}
+  .mv{font-size:22px;font-weight:800;padding:10px;border-radius:12px;text-align:center;}
+  .mv.win{background:rgba(74,222,128,0.18);color:#4ade80;border:1px solid rgba(74,222,128,0.4);}
+  .mv.lose{background:rgba(255,255,255,0.05);color:#94a3b8;border:1px solid rgba(255,255,255,0.08);}
+  .mv.draw{background:rgba(255,255,255,0.08);color:#cbd5e1;border:1px solid rgba(255,255,255,0.12);}
+  .mcenter{text-align:center;color:#5d6b8c;font-size:12px;}
+  .section-title{font-size:15px;color:#9fb0d6;letter-spacing:1px;margin:6px 0 10px;}
+  .common{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+  .card{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);border-radius:12px;overflow:hidden;}
+  .cover{width:100%;height:110px;object-fit:cover;background:#1a2240;display:block;}
+  .cinfo{padding:8px 10px;}
+  .cname{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .ctime{display:flex;justify-content:space-between;font-size:11px;color:#9fb0d6;margin-top:4px;}
+  .footer{text-align:center;color:#5d6b8c;font-size:11px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="vs">
+    <div class="player">
+      {% if me.avatar_uri %}<img class="avatar" src="{{ me.avatar_uri }}">{% else %}<div class="avatar"></div>{% endif %}
+      <div class="pname">{{ me.online_id }}</div>
+    </div>
+    <div class="vs-badge">VS</div>
+    <div class="player">
+      {% if target.avatar_uri %}<img class="avatar" src="{{ target.avatar_uri }}">{% else %}<div class="avatar"></div>{% endif %}
+      <div class="pname">{{ target.online_id }}</div>
+    </div>
+  </div>
+
+  <div>
+    {% for m in metrics %}
+    <div class="metric-label">{{ m.label }}</div>
+    <div class="metrics" style="margin-bottom:10px;">
+      <div class="mv {{ m.a.r }}">{{ m.a.v }}</div>
+      <div class="mcenter">对比</div>
+      <div class="mv {{ m.b.r }}">{{ m.b.v }}</div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div>
+    <div class="section-title">共同拥有的游戏（{{ common_count }} 款，展示前 {{ common_games|length }}）</div>
+    {% if common_games %}
+    <div class="common">
+      {% for g in common_games %}
+      <div class="card">
+        {% if g.image_uri %}<img class="cover" src="{{ g.image_uri }}">{% else %}<div class="cover"></div>{% endif %}
+        <div class="cinfo">
+          <div class="cname" title="{{ g.name }}">{{ g.name }}</div>
+          <div class="ctime"><span>我 {{ g.my_time }}</span><span>TA {{ g.tg_time }}</span></div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div style="color:#9fb0d6;font-size:13px;text-align:center;padding:20px;">两人暂时没有共同的 PS4/PS5 游戏记录。</div>
+    {% endif %}
+  </div>
+
+  <div class="footer">PlayStation Network · 数据由 PSNAWP 提供</div>
+</div>
+</body>
+</html>

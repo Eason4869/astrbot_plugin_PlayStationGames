@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: linear-gradient(135deg, #0b1a3a 0%, #0a0f1f 55%, #1a1033 100%);
+    color: #fff; width: 820px; padding: 36px;
+  }
+  .wrap { display: flex; flex-direction: column; gap: 22px; }
+  .header {
+    display: flex; align-items: center; gap: 24px;
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 24px; padding: 26px; position: relative; overflow: hidden;
+  }
+  .header::before {
+    content:""; position:absolute; inset:0;
+    background: radial-gradient(circle at 0% 0%, rgba(0,112,243,0.35), transparent 55%);
+  }
+  .avatar { width: 104px; height: 104px; border-radius: 50%; border: 3px solid #fff;
+    object-fit: cover; position: relative; z-index: 1; background:#222; }
+  .id-block { position: relative; z-index: 1; flex: 1; }
+  .online-id { font-size: 32px; font-weight: 700; letter-spacing: .5px; }
+  .about { color: #b9c4e0; font-size: 14px; margin-top: 6px; max-width: 520px; }
+  .badges { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .badge { font-size: 12px; padding: 4px 10px; border-radius: 999px;
+    background: rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.15); }
+  .badge.plus { background: linear-gradient(90deg,#f7c873,#e8a33d); color:#3a2400; border:none; font-weight:700; }
+  .status-pill { position: relative; z-index:1; text-align:right; }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:6px; vertical-align:middle; }
+  .dot.online { background:#4ade80; box-shadow:0 0 10px #4ade80; }
+  .dot.offline { background:#94a3b8; }
+  .status-text { font-size: 16px; font-weight: 600; }
+  .platform { color:#9fb0d6; font-size:12px; margin-top:4px; }
+  .section { background: rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.09);
+    border-radius: 20px; padding: 22px; }
+  .section-title { font-size: 16px; color:#9fb0d6; margin-bottom: 16px; letter-spacing:1px; }
+  .trophy-level {
+    display:flex; align-items:center; gap: 22px;
+  }
+  .level-circle {
+    width: 110px; height: 110px; border-radius: 50%; flex-shrink:0;
+    background: conic-gradient(#0070f3 {{ (trophy.progress or 0) * 3.6 }}deg, rgba(255,255,255,0.12) 0);
+    display:flex; align-items:center; justify-content:center; position:relative;
+  }
+  .level-circle::after {
+    content:""; position:absolute; inset:8px; border-radius:50%; background:#121a33;
+  }
+  .level-num { position: relative; z-index:1; font-size: 40px; font-weight: 800; }
+  .level-info { flex:1; }
+  .level-label { color:#9fb0d6; font-size:13px; }
+  .progress-bar { height:8px; background:rgba(255,255,255,0.12); border-radius:999px; margin-top:8px; overflow:hidden; }
+  .progress-fill { height:100%; background:linear-gradient(90deg,#0070f3,#4da3ff); width: {{ trophy.progress or 0 }}%; }
+  .progress-text { font-size:12px; color:#9fb0d6; margin-top:6px; }
+  .trophy-grid { display:grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin-top: 18px; }
+  .trophy-card {
+    background: rgba(255,255,255,0.06); border-radius:14px; padding:14px; text-align:center;
+    border:1px solid rgba(255,255,255,0.08);
+  }
+  .trophy-emoji { font-size: 26px; }
+  .trophy-count { font-size: 22px; font-weight: 700; margin-top: 4px; }
+  .trophy-name { font-size: 12px; color: #b9c4e0; margin-top: 2px; }
+  .private { color:#fca5a5; font-size:13px; }
+  .now-playing {
+    display:flex; align-items:center; gap:14px; margin-top: 14px;
+    background: linear-gradient(90deg, rgba(74,222,128,0.12), transparent);
+    border:1px solid rgba(74,222,128,0.25); border-radius:14px; padding:12px 14px;
+  }
+  .now-icon { width:54px; height:54px; border-radius:8px; object-fit:cover; }
+  .now-name { font-weight:600; font-size:15px; }
+  .now-status { color:#9fb0d6; font-size:12px; margin-top:2px; }
+  .footer { text-align:center; color:#5d6b8c; font-size:11px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    {% if profile.avatar_uri %}<img class="avatar" src="{{ profile.avatar_uri }}">{% else %}<div class="avatar"></div>{% endif %}
+    <div class="id-block">
+      <div class="online-id">{{ profile.online_id }}</div>
+      {% if profile.about_me %}<div class="about">{{ profile.about_me }}</div>{% endif %}
+      <div class="badges">
+        {% if profile.is_plus %}<span class="badge plus">PS PLUS</span>{% endif %}
+        {% if profile.is_verified %}<span class="badge">✓ 官方认证</span>{% endif %}
+        <span class="badge">PSN 玩家</span>
+      </div>
+    </div>
+    <div class="status-pill">
+      <div class="status-text">
+        <span class="dot {{ 'online' if presence.online_status == 'online' else 'offline' }}"></span>
+        {{ status_text }}
+      </div>
+      {% if presence.platform %}<div class="platform">当前平台 {{ presence.platform }}</div>{% endif %}
+    </div>
+  </div>
+
+  {% if presence.current_game %}
+  <div class="section">
+    <div class="section-title">正在游玩</div>
+    <div class="now-playing">
+      {% if presence.current_game.icon_uri %}<img class="now-icon" src="{{ presence.current_game.icon_uri }}">{% endif %}
+      <div>
+        <div class="now-name">{{ presence.current_game.title_name }}</div>
+        <div class="now-status">
+          {{ presence.current_game.launch_platform or presence.current_game.format }}
+          {% if presence.current_game.game_status %} · {{ presence.current_game.game_status }}{% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="section">
+    <div class="section-title">奖杯总览</div>
+    {% if trophy.private %}
+      <div class="private">该用户的奖杯数据为私密，无法查看。</div>
+    {% else %}
+    <div class="trophy-level">
+      <div class="level-circle"><span class="level-num">{{ trophy.level or 0 }}</span></div>
+      <div class="level-info">
+        <div class="level-label">奖杯等级 · 距下一级 {{ trophy.progress or 0 }}%</div>
+        <div class="progress-bar"><div class="progress-fill"></div></div>
+        <div class="progress-text">阶段 Tier {{ trophy.tier or '-' }}</div>
+      </div>
+    </div>
+    <div class="trophy-grid">
+      {% for key in ['platinum','gold','silver','bronze'] %}
+      <div class="trophy-card">
+        <div class="trophy-emoji">{{ trophy_meta[key].emoji }}</div>
+        <div class="trophy-count" style="color:{{ trophy_meta[key].color }}">{{ trophy.earned[key] if trophy.earned else 0 }}</div>
+        <div class="trophy-name">{{ trophy_meta[key].name }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="footer">PlayStation Network · 数据由 PSNAWP 提供</div>
+</div>
+</body>
+</html>
