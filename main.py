@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -49,7 +50,7 @@ ONLINE_STATUS_TEXT = {
     "astrbot_plugin_PlayStationGames",
     "Eason4869",
     "PlayStation玩家数据 — 绑定PSN账号，查询游戏库/游戏时间/奖杯、群内排行与对比（图片可视化）",
-    "1.0.2",
+    "1.1.0",
     "https://github.com/Eason4869/astrbot_plugin_PlayStationGames",
 )
 class PlayStationGamesPlugin(Star):
@@ -232,28 +233,89 @@ class PlayStationGamesPlugin(Star):
             return True
         return False
 
-    def _resolve_target(self, event: AstrMessageEvent, arg: str, fallback: bool = True) -> Optional[str]:
-        """从 @提及 / 参数 / 自身绑定解析目标 PSN online_id。"""
-        # @ 提及
+    def _extract_at_targets(self, event: AstrMessageEvent) -> List[str]:
+        """从消息链中提取 @ 提及的目标用户 id（已排除机器人自身与 @全体成员）。
+
+        不同适配器的 At 组件字段统一为 ``qq``，但值可能是 int/str。
+        """
+        targets: List[str] = []
         try:
             from astrbot.api import message_components as Comp
 
+            self_id = ""
+            try:
+                self_id = str(event.get_self_id() or "")
+            except Exception:
+                self_id = ""
             for comp in event.message_obj.message:
                 if isinstance(comp, Comp.At):
-                    target = str(getattr(comp, "qq", "") or getattr(comp, "target", "") or "")
-                    if target and target in self.bindings:
-                        return self.bindings[target]
+                    qid = str(getattr(comp, "qq", "") or "").strip()
+                    if not qid or qid.lower() == "all":
+                        continue
+                    if self_id and qid == self_id:
+                        # 群聊里唤醒机器人的第一个 @ 不能当作查询目标
+                        continue
+                    if qid not in targets:
+                        targets.append(qid)
+                elif isinstance(comp, Comp.AtAll):
+                    continue
         except Exception:
             pass
+        return targets
+
+    @staticmethod
+    def _strip_at_text(text: str) -> str:
+        """清理参数里残留的 @ 文本，如 ``@昵称(123456)`` / ``[At:123456]``。"""
+        if not text:
+            return ""
+        text = text.strip()
+        # aiocqhttp 适配器的 message_str 中 @ 形如：@昵称(qq号)
+        text = re.sub(r"@[^\s()@]+\((\d+)\)", r"\1", text)
+        # 其他适配器可能使用 [At:qq号] 占位
+        text = re.sub(r"\[At:(\d+)\]", r"\1", text)
+        # 去掉残留的纯 @ 前缀（无括号）
+        text = re.sub(r"^@\S+", "", text).strip()
+        return text
+
+    def _resolve_target(
+        self,
+        event: AstrMessageEvent,
+        arg: str = "",
+        fallback: bool = True,
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """解析查询目标。
+
+        返回 ``(online_id, error)``：
+        - 成功时 ``error`` 为 ``None``；
+        - 显式指定了目标但无法解析（@了未绑定的人）时，``online_id`` 为 ``None``
+          并返回可读错误，避免把 ``@昵称(qq号)`` 之类的脏字符串当成 online_id 发给 PSN。
+        """
+        # 1) 消息链里的 @ 提及（最可靠）
+        at_targets = self._extract_at_targets(event)
+        if at_targets:
+            for qid in at_targets:
+                online_id = self.bindings.get(qid)
+                if online_id:
+                    return online_id, None
+            # 明确 @ 了人但 TA 没绑定
+            return None, "被 @ 的用户还没有绑定 PSN 账号，请提醒 TA 先使用 /绑定psn <PSN在线ID>。"
+
+        # 2) 文本参数：可能是 qq 号、PSN online_id，或残留的 @ 文本
+        arg = self._strip_at_text(arg or "")
         if arg:
-            arg = arg.strip()
-            # @ 的人可能直接以 qq 号传入
-            if arg in self.bindings:
-                return self.bindings[arg]
-            return arg  # 视作 online_id
+            # 纯数字：优先当作 qq 号查绑定
+            if arg.isdigit() and arg in self.bindings:
+                return self.bindings[arg], None
+            # 否则视为 PSN online_id（交由 PSN 校验）
+            return arg, None
+
+        # 3) 回退到发起人自身绑定
         if fallback:
-            return self.bindings.get(str(event.get_sender_id()))
-        return None
+            online_id = self.bindings.get(str(event.get_sender_id()))
+            if online_id:
+                return online_id, None
+            return None, "未找到绑定的 PSN ID。请先使用 /绑定psn <PSN在线ID> 绑定账号。"
+        return None, None
 
     async def _render(self, template_name: str, data: Dict[str, Any], width: int = 820) -> str:
         path = TEMPLATES_DIR / template_name
@@ -347,6 +409,8 @@ class PlayStationGamesPlugin(Star):
             "  /psn启用 / /psn禁用   开关本群插件（管理员）\n"
             "  /psn刷新             强制刷新自己的缓存\n"
             "——————————————\n"
+            "💬 也支持自然语言：直接 @机器人 说「查下我的奖杯」「群里谁最肝」\n"
+            "   「看看 @某人 在玩什么」即可，不必记忆指令。\n"
             "首次使用请先 /绑定psn 你的PSN ID。"
         )
         yield event.plain_result(help_text).use_t2i(False)
@@ -467,26 +531,14 @@ class PlayStationGamesPlugin(Star):
         if cg and cg.get("icon_url"):
             cg["icon_uri"] = mapping.get(cg["icon_url"], "")
 
-    @filter.command("psn", prefix_optional=True)
-    async def cmd_profile(self, event: AstrMessageEvent, arg: str = ""):
-        """查看 PSN 个人资料与奖杯总览。"""
-        self._log_usage(event, "psn", arg)
-        ok, msg = self._gate(event)
-        if not ok:
-            yield event.plain_result(msg)
-            return
-        online_id = self._resolve_target(event, arg, fallback=True)
-        if not online_id:
-            yield event.plain_result("未找到绑定的 PSN ID。请先 /绑定psn <ID>。")
-            return
+    # -------------------- 核心业务（命令与 LLM 共用） --------------------
 
+    async def _do_profile(self, online_id: str) -> Tuple[Optional[str], Optional[str]]:
+        """查询个人资料，返回 (图片路径, 错误信息)。"""
         client = await self._get_client()
-        yield event.plain_result(f"正在查询 {online_id} 的资料...")
         data = await self._safe_client_call(client.get_full_profile(online_id))
         if isinstance(data, str):
-            yield event.plain_result(data)
-            return
-
+            return None, data
         await self._collect_avatar(data)
         pres = data.get("presence", {})
         trophy = data.get("trophy_summary", {})
@@ -495,34 +547,42 @@ class PlayStationGamesPlugin(Star):
             "presence": pres,
             "trophy": trophy,
             "trophy_meta": TROPHY_META,
-            "status_text": ONLINE_STATUS_TEXT.get(pres.get("online_status", ""), pres.get("online_status", "未知")),
+            "status_text": ONLINE_STATUS_TEXT.get(
+                pres.get("online_status", ""), pres.get("online_status", "未知")
+            ),
         }
         img_url = await self._render("profile.html", render, width=820)
-        yield event.image_result(img_url)
+        return img_url, None
 
-    # -------------------- 游戏库 --------------------
-
-    @filter.command("psn游戏库", prefix_optional=True)
-    async def cmd_library(self, event: AstrMessageEvent, arg: str = ""):
-        """查看游戏库与游戏时间。"""
-        self._log_usage(event, "psn游戏库", arg)
+    @filter.command("psn", prefix_optional=True)
+    async def cmd_profile(self, event: AstrMessageEvent, arg: str = ""):
+        """查看 PSN 个人资料与奖杯总览。"""
+        self._log_usage(event, "psn", arg)
         ok, msg = self._gate(event)
         if not ok:
             yield event.plain_result(msg)
             return
-        online_id = self._resolve_target(event, arg, fallback=True)
+        online_id, err = self._resolve_target(event, arg, fallback=True)
         if not online_id:
-            yield event.plain_result("未找到绑定的 PSN ID。")
+            yield event.plain_result(err or "未找到绑定的 PSN ID。请先 /绑定psn <ID>。")
             return
 
+        yield event.plain_result(f"正在查询 {online_id} 的资料...")
+        img_url, err = await self._do_profile(online_id)
+        if err:
+            yield event.plain_result(err)
+            return
+        yield event.image_result(img_url)
+
+    # -------------------- 游戏库 --------------------
+
+    async def _do_library(self, online_id: str) -> Tuple[Optional[str], Optional[str]]:
+        """查询游戏库，返回 (图片路径, 错误信息)。"""
         client = await self._get_client()
-        yield event.plain_result(f"正在统计 {online_id} 的游戏库，请稍候...")
         titles = await self._safe_client_call(client.get_title_stats(online_id))
         if isinstance(titles, str):
-            yield event.plain_result(titles)
-            return
+            return None, titles
 
-        # 也取资料以展示头像和在线状态
         profile_data = None
         try:
             profile_data = await client.get_full_profile(online_id)
@@ -532,7 +592,6 @@ class PlayStationGamesPlugin(Star):
         total_seconds = sum(t.get("play_seconds", 0) for t in titles)
         total_count = len(titles)
         top = titles[:30]
-        # 下载封面
         icon_urls = [t.get("image_url") for t in top if t.get("image_url")]
         avatar_url = (profile_data or {}).get("profile", {}).get("avatar", "")
         if avatar_url:
@@ -542,7 +601,6 @@ class PlayStationGamesPlugin(Star):
             t["image_uri"] = await self.media.fetch(t.get("image_url"))
             t["play_time_str"] = self._format_seconds(t.get("play_seconds", 0))
 
-        # 按平台统计
         platform_stats: Dict[str, int] = {}
         for t in titles:
             p = t.get("platform") or "unknown"
@@ -561,25 +619,34 @@ class PlayStationGamesPlugin(Star):
             "show_all_note": total_count > len(top),
         }
         img_url = await self._render("library.html", render, width=880)
-        yield event.image_result(img_url)
+        return img_url, None
 
-    # -------------------- 奖杯 --------------------
-
-    @filter.command("psn奖杯", prefix_optional=True)
-    async def cmd_trophies(self, event: AstrMessageEvent, arg: str = ""):
-        """查看各游戏奖杯进度。"""
-        self._log_usage(event, "psn奖杯", arg)
+    @filter.command("psn游戏库", prefix_optional=True)
+    async def cmd_library(self, event: AstrMessageEvent, arg: str = ""):
+        """查看游戏库与游戏时间。"""
+        self._log_usage(event, "psn游戏库", arg)
         ok, msg = self._gate(event)
         if not ok:
             yield event.plain_result(msg)
             return
-        online_id = self._resolve_target(event, arg, fallback=True)
+        online_id, err = self._resolve_target(event, arg, fallback=True)
         if not online_id:
-            yield event.plain_result("未找到绑定的 PSN ID。")
+            yield event.plain_result(err or "未找到绑定的 PSN ID。")
             return
 
+        yield event.plain_result(f"正在统计 {online_id} 的游戏库，请稍候...")
+        img_url, err = await self._do_library(online_id)
+        if err:
+            yield event.plain_result(err)
+            return
+        yield event.image_result(img_url)
+
+
+    # -------------------- 奖杯 --------------------
+
+    async def _do_trophies(self, online_id: str) -> Tuple[Optional[str], Optional[str]]:
+        """查询奖杯进度，返回 (图片路径, 错误信息)。"""
         client = await self._get_client()
-        yield event.plain_result(f"正在获取 {online_id} 的奖杯数据...")
 
         async def _job():
             trophy_titles = await client.get_trophy_titles(online_id)
@@ -591,12 +658,10 @@ class PlayStationGamesPlugin(Star):
 
         result = await self._safe_client_call(_job())
         if isinstance(result, str):
-            yield event.plain_result(result)
-            return
+            return None, result
         trophy_titles, full = result
         if not trophy_titles:
-            yield event.plain_result("该账号暂无可显示的奖杯数据（可能是私密或从未获得过奖杯）。")
-            return
+            return None, "该账号暂无可显示的奖杯数据（可能是私密或从未获得过奖杯）。"
 
         summary = (full or {}).get("trophy_summary", {})
         top = trophy_titles[:25]
@@ -612,7 +677,9 @@ class PlayStationGamesPlugin(Star):
 
         render = {
             "online_id": online_id,
-            "avatar_uri": await self.media.fetch((full or {}).get("profile", {}).get("avatar", "")),
+            "avatar_uri": await self.media.fetch(
+                (full or {}).get("profile", {}).get("avatar", "")
+            ),
             "summary": summary,
             "trophy_meta": TROPHY_META,
             "titles": top,
@@ -620,6 +687,26 @@ class PlayStationGamesPlugin(Star):
             "show_all_note": len(trophy_titles) > len(top),
         }
         img_url = await self._render("trophies.html", render, width=880)
+        return img_url, None
+
+    @filter.command("psn奖杯", prefix_optional=True)
+    async def cmd_trophies(self, event: AstrMessageEvent, arg: str = ""):
+        """查看各游戏奖杯进度。"""
+        self._log_usage(event, "psn奖杯", arg)
+        ok, msg = self._gate(event)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        online_id, err = self._resolve_target(event, arg, fallback=True)
+        if not online_id:
+            yield event.plain_result(err or "未找到绑定的 PSN ID。")
+            return
+
+        yield event.plain_result(f"正在获取 {online_id} 的奖杯数据...")
+        img_url, err = await self._do_trophies(online_id)
+        if err:
+            yield event.plain_result(err)
+            return
         yield event.image_result(img_url)
 
     # -------------------- 群排行 --------------------
@@ -637,38 +724,21 @@ class PlayStationGamesPlugin(Star):
         "白金数": "platinum",
     }
 
-    @filter.command("psn排行", prefix_optional=True)
-    async def cmd_ranking(self, event: AstrMessageEvent, dimension: str = "时长"):
-        """群内 PSN 排行（时长/游戏数/奖杯/白金）。"""
-        self._log_usage(event, "psn排行", dimension)
-        ok, msg = self._gate(event)
-        if not ok:
-            yield event.plain_result(msg)
-            return
-        gid = str(event.get_group_id() or "")
-        if not gid:
-            yield event.plain_result("请在群聊中使用该指令。")
-            return
-
-        # 把发起人同步进群
-        if self._link_user_to_group(str(event.get_sender_id()), gid):
-            self._save_bindings()
-
-        sort_by = self.DIM_MAP.get(dimension.strip(), "time")
+    async def _do_ranking(
+        self, gid: str, sort_by: str
+    ) -> Tuple[Optional[str], Optional[str], str, int]:
+        """统计群排行，返回 (图片路径, 错误信息, 标题, 人数)。"""
         title_map = {
             "time": "群内 PSN 游戏时长排行",
             "count": "群内 PSN 游戏数量排行",
             "trophy": "群内 PSN 奖杯总分解禁排行",
             "platinum": "群内 PSN 白金杯排行",
         }
-        title = title_map[sort_by]
+        title = title_map.get(sort_by, title_map["time"])
 
         group_map = self.group_bindings.get(gid, {})
         if not group_map:
-            yield event.plain_result("本群还没有人绑定 PSN，请先使用 /绑定psn。")
-            return
-
-        yield event.plain_result(f"正在统计「{title}」，共 {len(group_map)} 人，请稍候...")
+            return None, "本群还没有人绑定 PSN，请先使用 /绑定psn。", title, 0
 
         client = await self._get_client()
         sem = asyncio.Semaphore(5)
@@ -706,11 +776,12 @@ class PlayStationGamesPlugin(Star):
                     trophy_score += self._trophy_score(tt.get("earned", {}))
                     platinum += int(tt.get("earned", {}).get("platinum", 0))
             else:
-                # 用 summary 的累计奖杯兜底
                 trophy_score = self._trophy_score(trophy_summary.get("earned", {}))
                 platinum = int(trophy_summary.get("earned", {}).get("platinum", 0))
 
-            titles_sorted = sorted(titles, key=lambda x: x.get("play_seconds", 0), reverse=True)
+            titles_sorted = sorted(
+                titles, key=lambda x: x.get("play_seconds", 0), reverse=True
+            )
             top_games = titles_sorted[:3]
             for g in top_games:
                 g["image_uri"] = await self.media.fetch(g.get("image_url"))
@@ -732,8 +803,7 @@ class PlayStationGamesPlugin(Star):
             )
 
         if not rank_rows:
-            yield event.plain_result("未能获取到任何群友的数据，请检查 NPSSO 与网络。")
-            return
+            return None, "未能获取到任何群友的数据，请检查 NPSSO 与网络。", title, 0
 
         key_map = {
             "time": "total_seconds",
@@ -752,32 +822,40 @@ class PlayStationGamesPlugin(Star):
             "member_count": len(rank_rows),
         }
         img_url = await self._render("ranking.html", render, width=820)
-        yield event.image_result(img_url)
+        return img_url, None, title, len(rank_rows)
 
-    # -------------------- 对比 --------------------
-
-    @filter.command("psn对比", prefix_optional=True)
-    async def cmd_compare(self, event: AstrMessageEvent, arg: str = ""):
-        """与群友对比游戏库和奖杯。"""
-        self._log_usage(event, "psn对比", arg)
+    @filter.command("psn排行", prefix_optional=True)
+    async def cmd_ranking(self, event: AstrMessageEvent, dimension: str = "时长"):
+        """群内 PSN 排行（时长/游戏数/奖杯/白金）。"""
+        self._log_usage(event, "psn排行", dimension)
         ok, msg = self._gate(event)
         if not ok:
             yield event.plain_result(msg)
             return
-        my_id = self.bindings.get(str(event.get_sender_id()))
-        if not my_id:
-            yield event.plain_result("你还没有绑定 PSN ID，请先 /绑定psn。")
-            return
-        target_id = self._resolve_target(event, arg, fallback=False)
-        if not target_id:
-            yield event.plain_result("请指定对比对象，例如 /psn对比 @某人 或 /psn对比 对方PSNID。")
-            return
-        if target_id.lower() == my_id.lower():
-            yield event.plain_result("不能和自己对比哦。")
+        gid = str(event.get_group_id() or "")
+        if not gid:
+            yield event.plain_result("请在群聊中使用该指令。")
             return
 
+        # 把发起人同步进群
+        if self._link_user_to_group(str(event.get_sender_id()), gid):
+            self._save_bindings()
+
+        sort_by = self.DIM_MAP.get((dimension or "时长").strip(), "time")
+        yield event.plain_result("正在统计群排行，请稍候...")
+        img_url, err, title, count = await self._do_ranking(gid, sort_by)
+        if err:
+            yield event.plain_result(err)
+            return
+        yield event.image_result(img_url)
+
+    # -------------------- 对比 --------------------
+
+    async def _do_compare(
+        self, my_id: str, target_id: str
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """对比两人数据，返回 (图片路径, 错误信息)。"""
         client = await self._get_client()
-        yield event.plain_result(f"正在对比 {my_id} 与 {target_id}...")
 
         async def _fetch(oid):
             full = await client.get_full_profile(oid)
@@ -785,16 +863,21 @@ class PlayStationGamesPlugin(Star):
             tt = await client.get_trophy_titles(oid)
             return full, titles, tt
 
-        result = await self._safe_client_call(asyncio.gather(_fetch(my_id), _fetch(target_id)))
+        result = await self._safe_client_call(
+            asyncio.gather(_fetch(my_id), _fetch(target_id))
+        )
         if isinstance(result, str):
-            yield event.plain_result(result)
-            return
+            return None, result
         (my_full, my_titles, my_tt), (tg_full, tg_titles, tg_tt) = result
 
         def _summarize(full, titles, trophy_titles):
             sec = sum(t.get("play_seconds", 0) for t in titles)
-            tscore = sum(self._trophy_score(t.get("earned", {})) for t in trophy_titles)
-            plat = sum(int(t.get("earned", {}).get("platinum", 0)) for t in trophy_titles)
+            tscore = sum(
+                self._trophy_score(t.get("earned", {})) for t in trophy_titles
+            )
+            plat = sum(
+                int(t.get("earned", {}).get("platinum", 0)) for t in trophy_titles
+            )
             return {
                 "online_id": full.get("profile", {}).get("online_id", ""),
                 "avatar_uri": "",
@@ -804,13 +887,19 @@ class PlayStationGamesPlugin(Star):
                 "trophy_score": tscore,
                 "platinum": plat,
                 "trophy_level": (full.get("trophy_summary") or {}).get("level", 0),
-                "title_ids": {t.get("title_id") for t in titles if t.get("title_id")},
+                "title_ids": {
+                    t.get("title_id") for t in titles if t.get("title_id")
+                },
             }
 
         me = _summarize(my_full, my_titles, my_tt)
         tg = _summarize(tg_full, tg_titles, tg_tt)
-        me["avatar_uri"] = await self.media.fetch(my_full.get("profile", {}).get("avatar", ""))
-        tg["avatar_uri"] = await self.media.fetch(tg_full.get("profile", {}).get("avatar", ""))
+        me["avatar_uri"] = await self.media.fetch(
+            my_full.get("profile", {}).get("avatar", "")
+        )
+        tg["avatar_uri"] = await self.media.fetch(
+            tg_full.get("profile", {}).get("avatar", "")
+        )
 
         common_ids = me["title_ids"] & tg["title_ids"]
         my_map = {t.get("title_id"): t for t in my_titles}
@@ -821,8 +910,12 @@ class PlayStationGamesPlugin(Star):
             if gm:
                 g = dict(gm)
                 g["image_uri"] = await self.media.fetch(g.get("image_url"))
-                g["my_time"] = self._format_seconds(my_map.get(cid, {}).get("play_seconds", 0))
-                g["tg_time"] = self._format_seconds(tg_map.get(cid, {}).get("play_seconds", 0))
+                g["my_time"] = self._format_seconds(
+                    my_map.get(cid, {}).get("play_seconds", 0)
+                )
+                g["tg_time"] = self._format_seconds(
+                    tg_map.get(cid, {}).get("play_seconds", 0)
+                )
                 common_games.append(g)
         common_games.sort(key=lambda x: x.get("play_seconds", 0), reverse=True)
 
@@ -839,7 +932,13 @@ class PlayStationGamesPlugin(Star):
 
         metrics = [
             _metric("游戏数量", me["game_count"], tg["game_count"]),
-            _metric("总游戏时长", me["total_seconds"], tg["total_seconds"], me["total_time_str"], tg["total_time_str"]),
+            _metric(
+                "总游戏时长",
+                me["total_seconds"],
+                tg["total_seconds"],
+                me["total_time_str"],
+                tg["total_time_str"],
+            ),
             _metric("奖杯总分", me["trophy_score"], tg["trophy_score"]),
             _metric("白金杯数", me["platinum"], tg["platinum"]),
         ]
@@ -852,6 +951,35 @@ class PlayStationGamesPlugin(Star):
             "common_games": common_games,
         }
         img_url = await self._render("compare.html", render, width=860)
+        return img_url, None
+
+    @filter.command("psn对比", prefix_optional=True)
+    async def cmd_compare(self, event: AstrMessageEvent, arg: str = ""):
+        """与群友对比游戏库和奖杯。"""
+        self._log_usage(event, "psn对比", arg)
+        ok, msg = self._gate(event)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        my_id = self.bindings.get(str(event.get_sender_id()))
+        if not my_id:
+            yield event.plain_result("你还没有绑定 PSN ID，请先 /绑定psn。")
+            return
+        target_id, err = self._resolve_target(event, arg, fallback=False)
+        if not target_id:
+            yield event.plain_result(
+                err or "请指定对比对象，例如 /psn对比 @某人 或 /psn对比 对方PSNID。"
+            )
+            return
+        if target_id.lower() == my_id.lower():
+            yield event.plain_result("不能和自己对比哦。")
+            return
+
+        yield event.plain_result(f"正在对比 {my_id} 与 {target_id}...")
+        img_url, err = await self._do_compare(my_id, target_id)
+        if err:
+            yield event.plain_result(err)
+            return
         yield event.image_result(img_url)
 
     # -------------------- 群联动 --------------------
@@ -948,6 +1076,57 @@ class PlayStationGamesPlugin(Star):
 
     # -------------------- 群内在线 --------------------
 
+    async def _do_online(
+        self, gid: str
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """统计群内在线状态，返回 (图片路径, 错误信息)。"""
+        group_map = self.group_bindings.get(gid, {})
+        if not group_map:
+            return None, "本群还没有人绑定 PSN。"
+
+        client = await self._get_client()
+        sem = asyncio.Semaphore(5)
+
+        async def _fetch(qq_id, oid):
+            async with sem:
+                try:
+                    full = await client.get_full_profile(oid)
+                    return qq_id, full
+                except Exception:
+                    return qq_id, None
+
+        results = await asyncio.gather(
+            *[_fetch(q, o) for q, o in group_map.items()]
+        )
+        rows = []
+        for qq_id, full in results:
+            if not full:
+                continue
+            pres = full.get("presence", {})
+            prof = full.get("profile", {})
+            cg = pres.get("current_game")
+            rows.append(
+                {
+                    "online_id": prof.get("online_id", ""),
+                    "avatar_uri": await self.media.fetch(prof.get("avatar", "")),
+                    "status": ONLINE_STATUS_TEXT.get(
+                        pres.get("online_status", ""),
+                        pres.get("online_status", "未知"),
+                    ),
+                    "is_online": pres.get("online_status") == "online",
+                    "platform": pres.get("platform", ""),
+                    "game": cg.get("title_name") if cg else "",
+                    "game_icon_uri": (
+                        await self.media.fetch(cg.get("icon_url")) if cg else ""
+                    ),
+                }
+            )
+        rows.sort(key=lambda r: (not r["is_online"], r["online_id"]))
+        online_count = sum(1 for r in rows if r["is_online"])
+        render = {"rows": rows, "online_count": online_count, "total": len(rows)}
+        img_url = await self._render("online.html", render, width=760)
+        return img_url, None
+
     @filter.command("psn在线", prefix_optional=True)
     async def cmd_online(self, event: AstrMessageEvent):
         """查看群内谁在线、正在玩什么。"""
@@ -960,47 +1139,216 @@ class PlayStationGamesPlugin(Star):
         if not gid:
             yield event.plain_result("请在群聊中使用该指令。")
             return
-        group_map = self.group_bindings.get(gid, {})
-        if not group_map:
-            yield event.plain_result("本群还没有人绑定 PSN。")
-            return
 
         yield event.plain_result("正在查看群友在线状态...")
-        client = await self._get_client()
-        sem = asyncio.Semaphore(5)
-
-        async def _fetch(qq_id, oid):
-            async with sem:
-                try:
-                    full = await client.get_full_profile(oid)
-                    return qq_id, full
-                except Exception:
-                    return qq_id, None
-
-        results = await asyncio.gather(*[_fetch(q, o) for q, o in group_map.items()])
-        rows = []
-        for qq_id, full in results:
-            if not full:
-                continue
-            pres = full.get("presence", {})
-            prof = full.get("profile", {})
-            cg = pres.get("current_game")
-            rows.append(
-                {
-                    "online_id": prof.get("online_id", ""),
-                    "avatar_uri": await self.media.fetch(prof.get("avatar", "")),
-                    "status": ONLINE_STATUS_TEXT.get(pres.get("online_status", ""), pres.get("online_status", "未知")),
-                    "is_online": pres.get("online_status") == "online",
-                    "platform": pres.get("platform", ""),
-                    "game": cg.get("title_name") if cg else "",
-                    "game_icon_uri": await self.media.fetch(cg.get("icon_url")) if cg else "",
-                }
-            )
-        rows.sort(key=lambda r: (not r["is_online"], r["online_id"]))
-        online_count = sum(1 for r in rows if r["is_online"])
-        render = {"rows": rows, "online_count": online_count, "total": len(rows)}
-        img_url = await self._render("online.html", render, width=760)
+        img_url, err = await self._do_online(gid)
+        if err:
+            yield event.plain_result(err)
+            return
         yield event.image_result(img_url)
+
+    # -------------------- LLM 自然语言工具 --------------------
+    #
+    # 以下工具通过 @filter.llm_tool 注册给 AstrBot 的函数调用（function-calling）能力。
+    # 用户不必输入严格的「/psn ...」指令，用自然语言（如「帮我看看小明在玩什么」
+    # 「查下我的奖杯」「群里谁最肝」）也能触发。工具内部复用上面的核心业务方法，
+    # 与指令路径行为保持一致。
+    #
+    # 终止事件的标准写法（见 AstrBot 文档）：先 event.stop_event() 再裸 yield，
+    # 这样工具产出的消息会被发送，同时阻止事件继续传播给 LLM 生成多余回复。
+
+    def _tool_gate(self, event: AstrMessageEvent, need_group: bool = False) -> Optional[str]:
+        """LLM 工具的统一准入检查，返回错误信息；None 表示通过。"""
+        ok, msg = self._gate(event)
+        if not ok:
+            return msg
+        if need_group and not event.get_group_id():
+            return "该功能需要在群聊中使用。"
+        return None
+
+    @filter.llm_tool(name="psn_query_profile")
+    async def tool_query_profile(self, event: AstrMessageEvent, target: str = ""):
+        '''查询 PlayStation(PSN) 玩家的个人资料、在线状态和奖杯总览。当用户想查看某人或自己的 PSN 资料、在不在线、正在玩什么、奖杯等级时调用。
+
+        Args:
+            target(string): 要查询的目标。可为空(表示查询用户自己)、PSN 在线 ID、或对方的群昵称/QQ号。若消息中 @ 了某人，留空即可，会自动识别被 @ 的人。
+        '''
+        err = self._tool_gate(event)
+        if err:
+            event.stop_event()
+            yield event.plain_result(err)
+            return
+        online_id, rerr = self._resolve_target(event, target or "", fallback=True)
+        if not online_id:
+            event.stop_event()
+            yield event.plain_result(
+                rerr or "未找到绑定的 PSN ID。请先使用 /绑定psn <PSN在线ID> 绑定。"
+            )
+            return
+        img_url, serr = await self._do_profile(online_id)
+        if serr:
+            event.stop_event()
+            yield event.plain_result(serr)
+            return
+        event.stop_event()
+        yield event.image_result(img_url)
+
+    @filter.llm_tool(name="psn_query_library")
+    async def tool_query_library(self, event: AstrMessageEvent, target: str = ""):
+        '''查询 PlayStation(PSN) 玩家的游戏库和游戏时长。当用户想看某人或自己玩过哪些游戏、总游戏时长、各平台游戏数量、游戏封面墙时调用。
+
+        Args:
+            target(string): 要查询的目标。可为空(查询自己)、PSN 在线 ID、或对方的群昵称/QQ号。若消息中 @ 了某人，留空即可自动识别。
+        '''
+        err = self._tool_gate(event)
+        if err:
+            event.stop_event()
+            yield event.plain_result(err)
+            return
+        online_id, rerr = self._resolve_target(event, target or "", fallback=True)
+        if not online_id:
+            event.stop_event()
+            yield event.plain_result(
+                rerr or "未找到绑定的 PSN ID。请先使用 /绑定psn <PSN在线ID> 绑定。"
+            )
+            return
+        img_url, serr = await self._do_library(online_id)
+        if serr:
+            event.stop_event()
+            yield event.plain_result(serr)
+            return
+        event.stop_event()
+        yield event.image_result(img_url)
+
+    @filter.llm_tool(name="psn_query_trophies")
+    async def tool_query_trophies(self, event: AstrMessageEvent, target: str = ""):
+        '''查询 PlayStation(PSN) 玩家的奖杯进度。当用户想看某人或自己各游戏的奖杯完成度、白金/金/银/铜奖杯进度时调用。
+
+        Args:
+            target(string): 要查询的目标。可为空(查询自己)、PSN 在线 ID、或对方的群昵称/QQ号。若消息中 @ 了某人，留空即可自动识别。
+        '''
+        err = self._tool_gate(event)
+        if err:
+            event.stop_event()
+            yield event.plain_result(err)
+            return
+        online_id, rerr = self._resolve_target(event, target or "", fallback=True)
+        if not online_id:
+            event.stop_event()
+            yield event.plain_result(
+                rerr or "未找到绑定的 PSN ID。请先使用 /绑定psn <PSN在线ID> 绑定。"
+            )
+            return
+        img_url, serr = await self._do_trophies(online_id)
+        if serr:
+            event.stop_event()
+            yield event.plain_result(serr)
+            return
+        event.stop_event()
+        yield event.image_result(img_url)
+
+    @filter.llm_tool(name="psn_ranking")
+    async def tool_ranking(self, event: AstrMessageEvent, dimension: str = "时长"):
+        '''查看当前群聊的 PlayStation(PSN) 排行榜。当用户说群排行、谁最肝、谁游戏最多、谁奖杯多、谁白金多时调用。
+
+        Args:
+            dimension(string): 排行维度，可选值："时长"(游戏时长/肝度，默认)、"游戏数"(游戏数量)、"奖杯"(奖杯总分)、"白金"(白金杯数量)。无法判断时填"时长"。
+        '''
+        err = self._tool_gate(event, need_group=True)
+        if err:
+            event.stop_event()
+            yield event.plain_result(err)
+            return
+        gid = str(event.get_group_id() or "")
+        if self._link_user_to_group(str(event.get_sender_id()), gid):
+            self._save_bindings()
+        sort_by = self.DIM_MAP.get((dimension or "时长").strip(), "time")
+        img_url, serr, _title, _count = await self._do_ranking(gid, sort_by)
+        if serr:
+            event.stop_event()
+            yield event.plain_result(serr)
+            return
+        event.stop_event()
+        yield event.image_result(img_url)
+
+    @filter.llm_tool(name="psn_compare")
+    async def tool_compare(self, event: AstrMessageEvent, target: str = ""):
+        '''把用户自己与另一位 PlayStation(PSN) 玩家做对比，比较游戏数量、总时长、奖杯、白金数及共同游戏。
+
+        Args:
+            target(string): 对比对象，通常是被 @ 的人、对方的 PSN 在线 ID 或 QQ号。
+        '''
+        err = self._tool_gate(event)
+        if err:
+            event.stop_event()
+            yield event.plain_result(err)
+            return
+        my_id = self.bindings.get(str(event.get_sender_id()))
+        if not my_id:
+            event.stop_event()
+            yield event.plain_result("你还没有绑定 PSN ID，请先使用 /绑定psn <PSN在线ID>。")
+            return
+        target_id, rerr = self._resolve_target(event, target or "", fallback=False)
+        if not target_id:
+            event.stop_event()
+            yield event.plain_result(
+                rerr or "请指定对比对象，可以 @ 某人或告诉我对方的 PSN 在线 ID。"
+            )
+            return
+        if target_id.lower() == my_id.lower():
+            event.stop_event()
+            yield event.plain_result("不能和自己对比哦。")
+            return
+        img_url, serr = await self._do_compare(my_id, target_id)
+        if serr:
+            event.stop_event()
+            yield event.plain_result(serr)
+            return
+        event.stop_event()
+        yield event.image_result(img_url)
+
+    @filter.llm_tool(name="psn_online")
+    async def tool_online(self, event: AstrMessageEvent):
+        '''查看当前群聊里哪些 PlayStation(PSN) 玩家在线、正在玩什么游戏。当用户问"群里谁在线""现在有人在玩什么吗"时调用。'''
+        err = self._tool_gate(event, need_group=True)
+        if err:
+            event.stop_event()
+            yield event.plain_result(err)
+            return
+        gid = str(event.get_group_id() or "")
+        img_url, serr = await self._do_online(gid)
+        if serr:
+            event.stop_event()
+            yield event.plain_result(serr)
+            return
+        event.stop_event()
+        yield event.image_result(img_url)
+
+    @filter.llm_tool(name="psn_bind_help")
+    async def tool_bind_help(self, event: AstrMessageEvent, online_id: str = ""):
+        '''了解或执行 PlayStation(PSN) 账号绑定。当用户想绑定 PSN、询问怎么绑定、或给出了自己的 PSN 在线 ID 要求绑定时调用。
+
+        Args:
+            online_id(string): 用户的 PSN 在线 ID。若用户只是询问怎么绑定而未提供 ID，则留空。
+        '''
+        err = self._tool_gate(event)
+        if err:
+            event.stop_event()
+            yield event.plain_result(err)
+            return
+        if not online_id:
+            event.stop_event()
+            yield event.plain_result(
+                "绑定 PSN 账号请使用指令：/绑定psn 你的PSN在线ID\n"
+                "例如：/绑定psn XiaoMing\n"
+                "绑定后即可用自然语言或 /psn 查询资料、游戏库、奖杯等。"
+            ).use_t2i(False)
+            return
+        # 直接引导用户走标准绑定指令（绑定需要校验，复用已有指令最稳妥）
+        event.stop_event()
+        yield event.plain_result(
+            f"好的，请发送以下指令完成绑定（会校验该 PSN ID 是否存在）：\n/绑定psn {online_id}"
+        ).use_t2i(False)
 
     # -------------------- 生命周期 --------------------
 
