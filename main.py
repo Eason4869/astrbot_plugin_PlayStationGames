@@ -15,6 +15,7 @@ import asyncio
 import json
 import re
 import time
+import traceback
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -50,7 +51,7 @@ ONLINE_STATUS_TEXT = {
     "astrbot_plugin_PlayStationGames",
     "Eason4869",
     "PlayStation玩家数据 — 绑定PSN账号，查询游戏库/游戏时间/奖杯、群内排行与对比（图片可视化）",
-    "1.1.3",
+    "1.1.4",
     "https://github.com/Eason4869/astrbot_plugin_PlayStationGames",
 )
 class PlayStationGamesPlugin(Star):
@@ -1190,6 +1191,31 @@ class PlayStationGamesPlugin(Star):
                 pass
         yield result
 
+    async def _tool_error(self, event: AstrMessageEvent, action: str, exc: BaseException):
+        """LLM 工具统一异常出口：记录完整堆栈，并以用户可读文案返回，避免异常逃逸到 Agent。
+
+        指令路径有独立的发送流程，而 LLM 工具运行在 Agent 的工具执行器中，一旦抛出未捕获异常，
+        Agent 只会得到一个工具执行失败，进而回复“接口不稳定/暂时查不了”，真正原因被吞掉。
+        这里把异常转成普通消息结果返回给用户，同时把堆栈打到日志便于排查。
+        """
+        logger.error(f"[PSN] LLM 工具执行异常（{action}）：{exc}\n{traceback.format_exc()}")
+        friendly = self._friendly_tool_error(action, exc)
+        async for r in self._yield_tool_result(event, event.plain_result(friendly)):
+            yield r
+
+    @staticmethod
+    def _friendly_tool_error(action: str, exc: BaseException) -> str:
+        text = str(exc)
+        if isinstance(exc, PSNAuthError):
+            return f"PSN 认证失败，{action}失败。请让管理员检查/更新 NPSSO 令牌。"
+        if isinstance(exc, PSNNotFound):
+            return f"未找到对应的 PSN 用户：{text}。请确认 PSN 在线 ID 正确，或先使用 /绑定psn 绑定。"
+        if isinstance(exc, PSNForbidden):
+            return f"该用户资料为私密，无法{action}。"
+        if isinstance(exc, asyncio.TimeoutError) or "timeout" in text.lower() or "timed out" in text.lower():
+            return f"PSN 接口响应超时，暂时{action}失败，请稍后重试。"
+        return f"{action}时出现错误：{text or exc.__class__.__name__}"
+
     def _refers_to_self(self, event: AstrMessageEvent, text: str) -> bool:
         """判断 LLM 传来的目标文本是否其实指的是用户自己。
 
@@ -1239,14 +1265,19 @@ class PlayStationGamesPlugin(Star):
             async for r in self._yield_tool_result(event, event.plain_result(err)):
                 yield r
             return
-        online_id, rerr = await self._tool_resolve_target(event, target or "")
-        if not online_id:
-            async for r in self._yield_tool_result(event, event.plain_result(rerr)):
-                yield r
-            return
-        img_url, serr = await self._do_profile(online_id)
-        if serr:
-            async for r in self._yield_tool_result(event, event.plain_result(serr)):
+        try:
+            online_id, rerr = await self._tool_resolve_target(event, target or "")
+            if not online_id:
+                async for r in self._yield_tool_result(event, event.plain_result(rerr)):
+                    yield r
+                return
+            img_url, serr = await self._do_profile(online_id)
+            if serr:
+                async for r in self._yield_tool_result(event, event.plain_result(serr)):
+                    yield r
+                return
+        except Exception as e:
+            async for r in self._tool_error(event, "查询 PSN 资料", e):
                 yield r
             return
         async for r in self._yield_tool_result(event, event.image_result(img_url)):
@@ -1264,14 +1295,19 @@ class PlayStationGamesPlugin(Star):
             async for r in self._yield_tool_result(event, event.plain_result(err)):
                 yield r
             return
-        online_id, rerr = await self._tool_resolve_target(event, target or "")
-        if not online_id:
-            async for r in self._yield_tool_result(event, event.plain_result(rerr)):
-                yield r
-            return
-        img_url, serr = await self._do_library(online_id)
-        if serr:
-            async for r in self._yield_tool_result(event, event.plain_result(serr)):
+        try:
+            online_id, rerr = await self._tool_resolve_target(event, target or "")
+            if not online_id:
+                async for r in self._yield_tool_result(event, event.plain_result(rerr)):
+                    yield r
+                return
+            img_url, serr = await self._do_library(online_id)
+            if serr:
+                async for r in self._yield_tool_result(event, event.plain_result(serr)):
+                    yield r
+                return
+        except Exception as e:
+            async for r in self._tool_error(event, "查询游戏库", e):
                 yield r
             return
         async for r in self._yield_tool_result(event, event.image_result(img_url)):
@@ -1289,14 +1325,19 @@ class PlayStationGamesPlugin(Star):
             async for r in self._yield_tool_result(event, event.plain_result(err)):
                 yield r
             return
-        online_id, rerr = await self._tool_resolve_target(event, target or "")
-        if not online_id:
-            async for r in self._yield_tool_result(event, event.plain_result(rerr)):
-                yield r
-            return
-        img_url, serr = await self._do_trophies(online_id)
-        if serr:
-            async for r in self._yield_tool_result(event, event.plain_result(serr)):
+        try:
+            online_id, rerr = await self._tool_resolve_target(event, target or "")
+            if not online_id:
+                async for r in self._yield_tool_result(event, event.plain_result(rerr)):
+                    yield r
+                return
+            img_url, serr = await self._do_trophies(online_id)
+            if serr:
+                async for r in self._yield_tool_result(event, event.plain_result(serr)):
+                    yield r
+                return
+        except Exception as e:
+            async for r in self._tool_error(event, "查询奖杯", e):
                 yield r
             return
         async for r in self._yield_tool_result(event, event.image_result(img_url)):
@@ -1317,10 +1358,15 @@ class PlayStationGamesPlugin(Star):
         gid = str(event.get_group_id() or "")
         if self._link_user_to_group(str(event.get_sender_id()), gid):
             self._save_bindings()
-        sort_by = self.DIM_MAP.get((dimension or "时长").strip(), "time")
-        img_url, serr, _title, _count = await self._do_ranking(gid, sort_by)
-        if serr:
-            async for r in self._yield_tool_result(event, event.plain_result(serr)):
+        try:
+            sort_by = self.DIM_MAP.get((dimension or "时长").strip(), "time")
+            img_url, serr, _title, _count = await self._do_ranking(gid, sort_by)
+            if serr:
+                async for r in self._yield_tool_result(event, event.plain_result(serr)):
+                    yield r
+                return
+        except Exception as e:
+            async for r in self._tool_error(event, "查询群排行", e):
                 yield r
             return
         async for r in self._yield_tool_result(event, event.image_result(img_url)):
@@ -1345,20 +1391,25 @@ class PlayStationGamesPlugin(Star):
             ):
                 yield r
             return
-        target_id, rerr = self._resolve_target(event, target or "", fallback=False)
-        if not target_id:
-            async for r in self._yield_tool_result(
-                event, event.plain_result(rerr or "请指定对比对象，可以 @ 某人或告诉我对方的 PSN 在线 ID。")
-            ):
-                yield r
-            return
-        if target_id.lower() == my_id.lower():
-            async for r in self._yield_tool_result(event, event.plain_result("不能和自己对比哦。")):
-                yield r
-            return
-        img_url, serr = await self._do_compare(my_id, target_id)
-        if serr:
-            async for r in self._yield_tool_result(event, event.plain_result(serr)):
+        try:
+            target_id, rerr = self._resolve_target(event, target or "", fallback=False)
+            if not target_id:
+                async for r in self._yield_tool_result(
+                    event, event.plain_result(rerr or "请指定对比对象，可以 @ 某人或告诉我对方的 PSN 在线 ID。")
+                ):
+                    yield r
+                return
+            if target_id.lower() == my_id.lower():
+                async for r in self._yield_tool_result(event, event.plain_result("不能和自己对比哦。")):
+                    yield r
+                return
+            img_url, serr = await self._do_compare(my_id, target_id)
+            if serr:
+                async for r in self._yield_tool_result(event, event.plain_result(serr)):
+                    yield r
+                return
+        except Exception as e:
+            async for r in self._tool_error(event, "对比 PSN 数据", e):
                 yield r
             return
         async for r in self._yield_tool_result(event, event.image_result(img_url)):
@@ -1373,9 +1424,14 @@ class PlayStationGamesPlugin(Star):
                 yield r
             return
         gid = str(event.get_group_id() or "")
-        img_url, serr = await self._do_online(gid)
-        if serr:
-            async for r in self._yield_tool_result(event, event.plain_result(serr)):
+        try:
+            img_url, serr = await self._do_online(gid)
+            if serr:
+                async for r in self._yield_tool_result(event, event.plain_result(serr)):
+                    yield r
+                return
+        except Exception as e:
+            async for r in self._tool_error(event, "查询在线状态", e):
                 yield r
             return
         async for r in self._yield_tool_result(event, event.image_result(img_url)):
@@ -1407,30 +1463,35 @@ class PlayStationGamesPlugin(Star):
 
         client = await self._get_client()
         try:
-            profile = await client.get_full_profile(online_id)
-        except PSNNotFound:
-            async for r in self._yield_tool_result(
-                event,
-                event.plain_result(f"未找到 PSN 用户「{online_id}」，请检查在线 ID 是否正确（注意大小写）。"),
-            ):
-                yield r
-            return
-        except PSNAuthError as e:
-            async for r in self._yield_tool_result(
-                event, event.plain_result(f"认证失败：{e}\n请让管理员更新 NPSSO 令牌。")
-            ):
-                yield r
-            return
-        except (PSNForbidden, PSNClientError) as e:
-            # 资料私密或部分接口受限，但 ID 存在，仍允许绑定
-            logger.warning(f"[PSN] LLM 绑定时部分数据获取失败，允许绑定：{e}")
-            profile = {"profile": {"online_id": online_id}}
+            try:
+                profile = await client.get_full_profile(online_id)
+            except PSNNotFound:
+                async for r in self._yield_tool_result(
+                    event,
+                    event.plain_result(f"未找到 PSN 用户「{online_id}」，请检查在线 ID 是否正确（注意大小写）。"),
+                ):
+                    yield r
+                return
+            except PSNAuthError as e:
+                async for r in self._yield_tool_result(
+                    event, event.plain_result(f"认证失败：{e}\n请让管理员更新 NPSSO 令牌。")
+                ):
+                    yield r
+                return
+            except (PSNForbidden, PSNClientError) as e:
+                # 资料私密或部分接口受限，但 ID 存在，仍允许绑定
+                logger.warning(f"[PSN] LLM 绑定时部分数据获取失败，允许绑定：{e}")
+                profile = {"profile": {"online_id": online_id}}
 
-        user_id = str(event.get_sender_id())
-        self.bindings[user_id] = online_id
-        self._link_user_to_group(user_id, event.get_group_id())
-        self._save_bindings()
-        name = (profile.get("profile", {}) or {}).get("online_id", online_id)
+            user_id = str(event.get_sender_id())
+            self.bindings[user_id] = online_id
+            self._link_user_to_group(user_id, event.get_group_id())
+            self._save_bindings()
+            name = (profile.get("profile", {}) or {}).get("online_id", online_id)
+        except Exception as e:
+            async for r in self._tool_error(event, "绑定 PSN 账号", e):
+                yield r
+            return
         async for r in self._yield_tool_result(
             event, event.plain_result(f"✅ 绑定成功！已关联 PSN 账号：{name}。现在可以直接问我 PSN 相关问题啦。").use_t2i(False)
         ):
