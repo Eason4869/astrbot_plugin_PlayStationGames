@@ -51,7 +51,7 @@ ONLINE_STATUS_TEXT = {
     "astrbot_plugin_PlayStationGames",
     "Eason4869",
     "PlayStation玩家数据 — 绑定PSN账号，查询游戏库/游戏时间/奖杯、群内排行与对比（图片可视化）",
-    "1.2.1",
+    "1.2.2",
     "https://github.com/Eason4869/astrbot_plugin_PlayStationGames",
 )
 class PlayStationGamesPlugin(Star):
@@ -1519,12 +1519,19 @@ class PlayStationGamesPlugin(Star):
         return t.strip(" 的了吗呢啊呀吧哦呗嘛")
 
     async def _dispatch_nl(self, event: AstrMessageEvent, text: str):
-        """自然语言意图处理（在插件阶段运行）。"""
+        """自然语言意图处理（在插件阶段运行）。
+
+        注意 AstrBot 的洋葱模型：一个 handler 内一旦调用 ``event.stop_event()``，
+        调度器在**当前这次 yield 的后续阶段跑完后**就会 ``break``，生成器不再恢复。
+        因此：
+          - 想发「进度提示」时，必须在 stop 之前 yield，且不要在 stop 后再 yield 第二条；
+          - 数据查询分支的正确顺序是：yield 进度（不 stop）-> await 取数 -> stop_event() -> yield 最终结果（仅一次）。
+        """
         self._log_usage(event, "nl_dispatch", text[:40])
         ok, gmsg = self._gate(event)
         if not ok:
-            yield event.plain_result(gmsg)
             event.stop_event()
+            yield event.plain_result(gmsg)
             return
 
         action = self._detect_intent(text)
@@ -1540,15 +1547,19 @@ class PlayStationGamesPlugin(Star):
             yield event.plain_result("该功能需要在群聊中使用哦。")
             return
 
+        def finish(result):
+            """停止事件并产出最终结果（仅允许 stop 后 yield 这一次）。"""
+            event.stop_event()
+            return result
+
         try:
             if action == "help":
-                event.stop_event()
-                yield event.plain_result(
+                yield finish(event.plain_result(
                     "直接 @我 用自然语言即可，例如：\n"
                     "「查我的 PSN 资料」「看看我的游戏库」「我的奖杯」\n"
                     "「群里谁最肝」「群里谁在线」「和 @某人 对比」\n"
                     "「查 艾尔登法环 游戏信息」「绑定psn，ID是 xxx」"
-                ).use_t2i(False)
+                ).use_t2i(False))
                 return
 
             if action == "bind":
@@ -1556,10 +1567,9 @@ class PlayStationGamesPlugin(Star):
                 m = re.search(r"(?:id\s*[是为:：]?\s*)([A-Za-z0-9_\-]{2,30})", text, re.I)
                 online_id = m.group(1) if m else ""
                 if not online_id:
-                    event.stop_event()
-                    yield event.plain_result(
+                    yield finish(event.plain_result(
                         "请告诉我你的 PSN 在线 ID，例如「绑定psn，ID是 XiaoMing」。"
-                    ).use_t2i(False)
+                    ).use_t2i(False))
                     return
                 event.stop_event()
                 async for r in self._nl_bind(event, online_id):
@@ -1573,20 +1583,17 @@ class PlayStationGamesPlugin(Star):
                     for gmap in self.group_bindings.values():
                         gmap.pop(user_id, None)
                     self._save_bindings()
-                event.stop_event()
-                yield event.plain_result("已解除你的 PSN 绑定。")
+                yield finish(event.plain_result("已解除你的 PSN 绑定。"))
                 return
 
             if action == "sync":
                 user_id = str(event.get_sender_id())
                 if user_id not in self.bindings:
-                    event.stop_event()
-                    yield event.plain_result("你还没有绑定 PSN ID，请先说「绑定psn，ID是 xxx」。")
+                    yield finish(event.plain_result("你还没有绑定 PSN ID，请先说「绑定psn，ID是 xxx」。"))
                     return
                 if self._link_user_to_group(user_id, gid):
                     self._save_bindings()
-                event.stop_event()
-                yield event.plain_result(f"已将你（{self.bindings[user_id]}）同步到本群排行。")
+                yield finish(event.plain_result(f"已将你（{self.bindings[user_id]}）同步到本群排行。"))
                 return
 
             if action == "ranking":
@@ -1594,109 +1601,74 @@ class PlayStationGamesPlugin(Star):
                     self._save_bindings()
                 dim = self._detect_dimension(text)
                 sort_by = self.DIM_MAP.get(dim, "time")
-                event.stop_event()
-                yield event.plain_result("正在统计群排行，请稍候...")
+                yield event.plain_result("正在统计群排行，请稍候...")  # 进度：stop 前发送
                 img_url, err, _t, _c = await self._do_ranking(gid, sort_by)
-                if err:
-                    yield event.plain_result(err)
-                else:
-                    yield event.image_result(img_url)
+                yield finish(event.plain_result(err) if err else event.image_result(img_url))
                 return
 
             if action == "online":
-                event.stop_event()
-                yield event.plain_result("正在查看群友在线状态...")
+                yield event.plain_result("正在查看群友在线状态...")  # 进度
                 img_url, err = await self._do_online(gid)
-                if err:
-                    yield event.plain_result(err)
-                else:
-                    yield event.image_result(img_url)
+                yield finish(event.plain_result(err) if err else event.image_result(img_url))
                 return
 
             if action == "network":
                 group_map = self.group_bindings.get(gid, {})
                 if len(group_map) < 2:
-                    event.stop_event()
-                    yield event.plain_result("群内至少需要 2 人绑定才能分析联动。")
+                    yield finish(event.plain_result("群内至少需要 2 人绑定才能分析联动。"))
                     return
-                event.stop_event()
-                yield event.plain_result("正在分析群内 PSN 联动，可能需要一些时间...")
+                yield event.plain_result("正在分析群内 PSN 联动，可能需要一些时间...")  # 进度
                 img_url, err = await self._do_network(gid)
-                if err:
-                    yield event.plain_result(err)
-                else:
-                    yield event.image_result(img_url)
+                yield finish(event.plain_result(err) if err else event.image_result(img_url))
                 return
 
             if action == "compare":
                 my_id = self.bindings.get(str(event.get_sender_id()))
                 if not my_id:
-                    event.stop_event()
-                    yield event.plain_result("你还没有绑定 PSN ID，请先说「绑定psn，ID是 xxx」。")
+                    yield finish(event.plain_result("你还没有绑定 PSN ID，请先说「绑定psn，ID是 xxx」。"))
                     return
                 target_id, rerr = self._resolve_target(event, "", fallback=False)
                 if not target_id:
-                    event.stop_event()
-                    yield event.plain_result(
-                        rerr or "请 @ 你想对比的群友（对方需已绑定 PSN）。"
-                    )
+                    yield finish(event.plain_result(rerr or "请 @ 你想对比的群友（对方需已绑定 PSN）。"))
                     return
                 if target_id.lower() == my_id.lower():
-                    event.stop_event()
-                    yield event.plain_result("不能和自己对比哦。")
+                    yield finish(event.plain_result("不能和自己对比哦。"))
                     return
-                event.stop_event()
-                yield event.plain_result(f"正在对比 {my_id} 与 {target_id}...")
+                yield event.plain_result(f"正在对比 {my_id} 与 {target_id}...")  # 进度
                 img_url, err = await self._do_compare(my_id, target_id)
-                if err:
-                    yield event.plain_result(err)
-                else:
-                    yield event.image_result(img_url)
+                yield finish(event.plain_result(err) if err else event.image_result(img_url))
                 return
 
             if action == "game":
                 online_id, rerr = await self._tool_resolve_target(event, "")
                 if not online_id:
-                    event.stop_event()
-                    yield event.plain_result(rerr)
+                    yield finish(event.plain_result(rerr))
                     return
                 keyword = self._extract_game_keyword(text)
                 if not keyword:
-                    event.stop_event()
-                    yield event.plain_result("请告诉我想查询的游戏名称，例如「查 艾尔登法环 的游戏信息」。")
+                    yield finish(event.plain_result("请告诉我想查询的游戏名称，例如「查 艾尔登法环 的游戏信息」。"))
                     return
-                event.stop_event()
-                yield event.plain_result(f"正在查找 {online_id} 的游戏「{keyword}」...")
+                yield event.plain_result(f"正在查找 {online_id} 的游戏「{keyword}」...")  # 进度
                 img_url, err = await self._do_game(online_id, keyword)
-                if err:
-                    yield event.plain_result(err)
-                else:
-                    yield event.image_result(img_url)
+                yield finish(event.plain_result(err) if err else event.image_result(img_url))
                 return
 
             # 资料 / 游戏库 / 奖杯：目标优先取 @，其次自己
             online_id, rerr = await self._tool_resolve_target(event, "")
             if not online_id:
-                event.stop_event()
-                yield event.plain_result(rerr)
+                yield finish(event.plain_result(rerr))
                 return
 
             if action == "library":
-                event.stop_event()
-                yield event.plain_result(f"正在统计 {online_id} 的游戏库，请稍候...")
+                yield event.plain_result(f"正在统计 {online_id} 的游戏库，请稍候...")  # 进度
                 img_url, err = await self._do_library(online_id)
             elif action == "trophies":
-                event.stop_event()
-                yield event.plain_result(f"正在获取 {online_id} 的奖杯数据...")
+                yield event.plain_result(f"正在获取 {online_id} 的奖杯数据...")  # 进度
                 img_url, err = await self._do_trophies(online_id)
             else:  # profile
-                event.stop_event()
-                yield event.plain_result(f"正在查询 {online_id} 的资料...")
+                yield event.plain_result(f"正在查询 {online_id} 的资料...")  # 进度
                 img_url, err = await self._do_profile(online_id)
-            if err:
-                yield event.plain_result(err)
-            else:
-                yield event.image_result(img_url)
+            yield finish(event.plain_result(err) if err else event.image_result(img_url))
             return
 
         except Exception as e:
