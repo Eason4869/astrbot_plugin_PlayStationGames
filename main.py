@@ -46,12 +46,286 @@ ONLINE_STATUS_TEXT = {
     "away": "离开",
 }
 
+# 常见中文俗称 / 简称 -> 一个或多个「规范候选名」。
+# 每个俗称同时给出英文关键词与 PSN 常见中文正式名，去匹配时任一命中即可，
+# 这样无论对方库里游戏显示的是英文名还是中文名都能搜到。
+GAME_ALIAS_KEYWORDS = {
+    # FromSoftware
+    "老头环": ["elden ring", "艾尔登法环"],
+    "法环": ["elden ring", "艾尔登法环"],
+    "老头環": ["elden ring", "艾尔登法环"],
+    "艾尔登法环": ["elden ring", "艾尔登法环"],
+    "黑魂3": ["dark souls iii", "黑暗之魂3"], "黑暗之魂3": ["dark souls iii", "黑暗之魂3"],
+    "黑魂2": ["dark souls ii", "黑暗之魂2"], "黑暗之魂2": ["dark souls ii", "黑暗之魂2"],
+    "黑魂1": ["dark souls remastered", "dark souls", "黑暗之魂"],
+    "黑暗之魂1": ["dark souls", "黑暗之魂"],
+    "黑魂": ["dark souls", "黑暗之魂"],
+    "血源": ["bloodborne", "血源诅咒"], "血缘": ["bloodborne", "血源诅咒"],
+    "只狼": ["sekiro", "只狼"],
+    "装甲核心6": ["armored core vi"], "装核6": ["armored core vi"],
+    # 国产 / 神话
+    "黑神话悟空": ["black myth wukong", "黑神话 悟空", "黑神话悟空"],
+    "黑悟空": ["black myth wukong", "黑神话 悟空", "黑神话悟空"],
+    "黑神话": ["black myth wukong", "黑神话 悟空", "黑神话悟空", "wukong"],
+    "悟空": ["wukong", "黑神话 悟空", "黑神话悟空"],
+    # 战神
+    "战神5": ["god of war ragnarok", "战神 诸神黄昏"],
+    "诸神黄昏": ["ragnarok", "诸神黄昏"],
+    "战神诸神黄昏": ["god of war ragnarok", "战神 诸神黄昏"],
+    "战神4": ["god of war", "战神"], "新战神": ["god of war", "战神"],
+    # 最后生还者
+    "美末1": ["last of us part i", "last of us", "最后生还者"],
+    "美国末日": ["last of us part i", "last of us", "最后生还者 第一部"],
+    "最后生还者": ["last of us part i", "last of us", "最后生还者 第一部"],
+    "美末": ["last of us part i", "last of us", "最后生还者 第一部"],
+    "美末2": ["last of us part ii", "最后生还者 第二部", "最后生还者2", "最后生还者 第二部"],
+    "最后生还者2": ["last of us part ii", "最后生还者 第二部", "最后生还者2", "最后生还者 第二部"],
+    # 漫威
+    "蜘蛛侠2": ["spider-man 2", "漫威蜘蛛侠2"], "漫威蜘蛛侠2": ["spider-man 2", "漫威蜘蛛侠2"],
+    "蜘蛛侠迈尔斯": ["miles morales", "迈尔斯"],
+    "蜘蛛侠": ["spider-man", "蜘蛛侠"],
+    "金刚狼": ["wolverine"],
+    # 瑞奇
+    "瑞奇与叮当": ["ratchet clank", "瑞奇与叮当"],
+    "瑞奇叮当时空跳转": ["ratchet clank rift apart", "瑞奇与叮当 时空跳转"],
+    # 地平线
+    "地平线西之绝境": ["horizon forbidden west", "地平线 西之绝境"],
+    "地平线2": ["horizon forbidden west", "地平线 西之绝境"],
+    "地平线零之曙光": ["horizon zero dawn", "地平线 零之曙光"],
+    "地平线1": ["horizon zero dawn", "地平线 零之曙光"],
+    "地平线": ["horizon", "地平线"],
+    # GT
+    "gt7": ["gran turismo 7", "gt赛车7"], "gt赛车7": ["gran turismo 7", "gt赛车7"],
+    "跑车浪漫旅7": ["gran turismo 7", "跑车浪漫旅7"],
+    # 对马岛
+    "对马岛": ["ghost of tsushima", "对马岛之魂"],
+    "马岛之魂": ["ghost of tsushima", "对马岛之魂"],
+    "对马岛之魂": ["ghost of tsushima", "对马岛之魂"],
+    "对马岛之鬼": ["ghost of tsushima", "对马岛之魂"],
+    # 底特律
+    "底特律变人": ["detroit become human", "底特律 化身为人", "底特律 变人"],
+    "底特律化身为人": ["detroit become human", "底特律 化身为人"],
+    "变人": ["detroit become human", "底特律"],
+    # 神秘海域
+    "神秘海域4": ["uncharted 4", "神秘海域4"], "神海4": ["uncharted 4", "神秘海域4"],
+    "神海": ["uncharted", "神秘海域"], "神秘海域": ["uncharted", "神秘海域"],
+    # 荒野大镖客
+    "大镖客2": ["red dead redemption 2", "荒野大镖客 救赎2", "荒野大镖客2"],
+    "大表哥2": ["red dead redemption 2", "荒野大镖客 救赎2", "荒野大镖客2"],
+    "荒野大镖客2": ["red dead redemption 2", "荒野大镖客 救赎2", "荒野大镖客2"],
+    "大镖客": ["red dead redemption", "荒野大镖客"],
+    # GTA
+    "gta5": ["grand theft auto v", "gta v"],
+    "给他爱5": ["grand theft auto v", "gta v"], "三男一狗": ["grand theft auto v", "gta v"],
+    # 赛博朋克
+    "赛博朋克2077": ["cyberpunk 2077", "赛博朋克 2077"],
+    "赛博朋克边缘行者": ["cyberpunk", "赛博朋克"],
+    "赛博朋克": ["cyberpunk", "赛博朋克"],
+    # 巫师
+    "巫师3": ["witcher 3", "巫师3"], "巫师三": ["witcher 3", "巫师3"], "巫师": ["witcher", "巫师"],
+    # 生化危机
+    "生化危机4重制": ["resident evil 4", "生化危机4"],
+    "生化4重制": ["resident evil 4", "生化危机4"],
+    "生化危机4": ["resident evil 4", "生化危机4"], "生化4": ["resident evil 4", "生化危机4"],
+    "生化危机2重制": ["resident evil 2", "生化危机2"],
+    "生化2重制": ["resident evil 2", "生化危机2"],
+    "生化危机": ["resident evil", "生化危机"], "生化": ["resident evil", "生化危机"],
+    # 怪物猎人
+    "怪物猎人荒野": ["monster hunter wilds", "怪物猎人 荒野"],
+    "怪猎荒野": ["monster hunter wilds", "怪物猎人 荒野"],
+    "怪物猎人世界": ["monster hunter world", "怪物猎人 世界"],
+    "怪猎世界": ["monster hunter world", "怪物猎人 世界"],
+    "怪物猎人": ["monster hunter", "怪物猎人"], "怪猎": ["monster hunter", "怪物猎人"],
+    # 最终幻想
+    "最终幻想7重生": ["final fantasy vii rebirth", "ff7 rebirth", "最终幻想7 重生"],
+    "ff7重生": ["final fantasy vii rebirth", "ff7 rebirth", "最终幻想7 重生"],
+    "最终幻想7重制": ["final fantasy vii remake", "ff7 remake", "最终幻想7 重制"],
+    "ff7重制": ["final fantasy vii remake", "ff7 remake", "最终幻想7 重制"],
+    "最终幻想16": ["final fantasy xvi", "ff16", "最终幻想16"],
+    "ff16": ["final fantasy xvi", "ff16", "最终幻想16"],
+    "最终幻想": ["final fantasy", "最终幻想"], "ff7": ["final fantasy vii", "ff7", "最终幻想7"],
+    # 格斗
+    "铁拳8": ["tekken 8", "铁拳8"], "铁拳": ["tekken", "铁拳"],
+    "街霸6": ["street fighter 6", "街霸6"], "街头霸王6": ["street fighter 6", "街霸6"],
+    "街霸": ["street fighter", "街霸"],
+    # 如龙
+    "如龙": ["yakuza", "like a dragon", "如龙"],
+    "人中之龙": ["like a dragon", "yakuza", "人中之龙"],
+    # FIFA / FC
+    "fc24": ["ea sports fc 24", "fc24"], "fc25": ["ea sports fc 25", "fc25"],
+    "fifa": ["ea sports fc", "fifa"],
+    # 星刃
+    "星刃": ["stellar blade", "星刃"], "剑星": ["stellar blade", "星刃"],
+    # 米哈游
+    "原神": ["genshin", "原神"],
+    "崩坏星穹铁道": ["honkai star rail", "崩坏 星穹铁道"],
+    "星铁": ["honkai star rail", "崩坏 星穹铁道"],
+    # 其他第一方
+    "宇宙机器人": ["astro bot", "astro", "宇宙机器人"], "小机器人": ["astro bot", "astro"],
+    "双人成行": ["it takes two", "双人成行"],
+    "霍格沃茨之遗": ["hogwarts legacy", "霍格沃茨之遗"],
+    "霍格沃茨": ["hogwarts legacy", "霍格沃茨"], "霍格沃兹": ["hogwarts legacy", "霍格沃茨"],
+}
+
+
+def _expand_game_keywords(keyword: str) -> list:
+    """把用户输入扩展为多个候选搜索词：原始词 + 俗称映射到的中英文规范名。
+
+    带版本号的输入（如「美末2」「战神5」「黑魂3」）只会命中版本一致的俗称，
+    不会因为「美末」是「美末2」的子串而误连到不带版本/前作的别名。
+    """
+    kw = (keyword or "").strip()
+    if not kw:
+        return []
+    candidates = [kw]
+    norm_in = kw.lower().replace(" ", "")
+    in_versions = _version_tokens(kw)
+
+    def add(v):
+        if v and v not in candidates:
+            candidates.append(v)
+
+    for alias, canon_list in GAME_ALIAS_KEYWORDS.items():
+        alias_norm = alias.replace(" ", "").lower()
+        if not alias_norm:
+            continue
+        # 整体互为子串才视为命中该俗称
+        if alias_norm not in norm_in and norm_in not in alias_norm:
+            continue
+        # 版本一致性：输入带版本号时，别名/候选必须包含相同版本号
+        if in_versions:
+            alias_ver = _version_tokens(alias)
+            if in_versions.isdisjoint(alias_ver):
+                continue
+        for canon in canon_list:
+            if in_versions:
+                cv = _version_tokens(canon)
+                # 仅当候选自身带了「不同的版本号」才跳过；无版本号的候选（如
+                # 用副标题区分的 god of war ragnarok）保留，交给匹配打分区分
+                if cv and in_versions.isdisjoint(cv):
+                    continue
+            add(canon)
+    return candidates
+
+
+
+def _strip_game_noise(name: str) -> str:
+    """去掉版本/平台/版本文案，仅保留游戏名主体，便于比较。"""
+    s = (name or "").lower()
+    # 去除常见后缀/修饰词
+    s = re.sub(
+        r"[\(（\[【][^\)）\]】]{0,30}[\)）\]】]",
+        " ",
+        s,
+    )
+    s = re.sub(
+        r"\b(remaster|remake|remastered|definitive|deluxe|edition|"
+        r"standard|ultimate|goty|game of the year|reboot|director'?s? cut|"
+        r"full game|trial|demo|digital|special|anniversary|hd|4k|vr2?|"
+        r"ps4|ps5|psvr2?|playstation\s*\w*|version|ver)\b",
+        " ",
+        s,
+    )
+    return s
+
+
+def _norm_game(s: str) -> str:
+    """归一化游戏名：NFKC（全角转半角）、去音标、统一符号、小写、压空格。"""
+    s = (s or "").lower()
+    try:
+        import unicodedata
+
+        s = unicodedata.normalize("NFKC", s)
+        s = "".join(c for c in unicodedata.normalize("NFD", s) if not unicodedata.combining(c))
+    except Exception:
+        pass
+    s = _strip_game_noise(s)
+    # 把非字母数字中日韩字符统一成空格
+    s = re.sub(r"[^0-9a-z\u4e00-\u9fff]+", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def _game_tokens(s: str) -> set:
+    """提取英文/数字 token 集合（如 ragnarok、7、2077）。"""
+    toks = set()
+    for tok in re.split(r"[^0-9a-z\u4e00-\u9fff]+", (s or "").lower()):
+        tok = tok.strip()
+        if not tok:
+            continue
+        # 英文/数字 token；中文单字不参与 token 重合（交给子串）
+        if re.fullmatch(r"[0-9a-z]+", tok) and len(tok) >= 2:
+            toks.add(tok)
+    return toks
+
+
+# 英文游戏名里的常见停用词，不计入「内容词」重合
+_GAME_STOPWORDS = {
+    "the", "a", "an", "of", "and", "to", "in", "for", "edition", "game",
+    "part", "remaster", "remake", "remastered", "deluxe", "ultimate",
+    "standard", "digital", "special", "full", "version", "ver", "hd",
+}
+# 罗马数字 / 阿拉伯数字版本号 token
+_ROMAN = {
+    "i": 1, "ii": 2, "iii": 3, "iv": 4, "v": 5, "vi": 6, "vii": 7,
+    "viii": 8, "ix": 9, "x": 10, "xi": 11, "xii": 12,
+}
+# 中文数字（用于「第二部」「二代」「2代」等版本识别）
+_CN_NUM = {"一": "1", "二": "2", "两": "2", "三": "3", "四": "4", "五": "5",
+           "六": "6", "七": "7", "八": "8", "九": "9", "十": "10"}
+
+
+def _version_tokens(s: str) -> set:
+    """提取版本标识集合：阿拉伯数字、独立罗马数字、以及「第X部/代/部/章」里的中文数字。"""
+    out = set()
+    for tok in _game_tokens(s):
+        if tok.isdigit():
+            out.add(tok)
+        elif tok in _ROMAN:
+            out.add(str(_ROMAN[tok]))
+    # 中文序数：第X部 / 第X代 / X代 / X部（如「第二部」「第二部」「2代」）
+    for m in re.finditer(r"第?([0-9一二两三四五六七八九十]{1,3})\s*[部代章季部作]?", s):
+        num = m.group(1)
+        if num.isdigit():
+            out.add(str(int(num)))
+        else:
+            # 中文数字逐字映射（覆盖常见个位数/十）
+            if num in _CN_NUM:
+                out.add(_CN_NUM[num])
+            elif num.startswith("十"):
+                out.add("10")
+            elif "十" in num:
+                parts = num.split("十")
+                tens = _CN_NUM.get(parts[0], "1") if parts[0] else "1"
+                ones = _CN_NUM.get(parts[1], "0") if len(parts) > 1 and parts[1] else "0"
+                try:
+                    out.add(str(int(tens) * 10 + int(ones)))
+                except Exception:
+                    pass
+    return out
+
+
+def _query_versions(raw_kw: str, kw_terms) -> set:
+    """汇总用户查询（含别名扩展）里出现的所有版本号；空集合表示查询未指定版本。"""
+    vs = set()
+    for term in kw_terms:
+        vs |= _version_tokens(term)
+    return vs
+
+
+def _content_tokens(s: str) -> set:
+    """去掉停用词与版本号后的内容词集合，用于相似度计算。"""
+    return {
+        t for t in _game_tokens(s)
+        if t not in _GAME_STOPWORDS and t not in _ROMAN and not t.isdigit()
+    }
+
 
 @register(
     "astrbot_plugin_PlayStationGames",
     "Eason4869",
     "PlayStation玩家数据 — 绑定PSN账号，查询游戏库/游戏时间/奖杯、群内排行与对比（图片可视化）",
-    "1.2.2",
+    "1.3.0",
     "https://github.com/Eason4869/astrbot_plugin_PlayStationGames",
 )
 class PlayStationGamesPlugin(Star):
@@ -440,7 +714,7 @@ class PlayStationGamesPlugin(Star):
             return
 
         client = await self._get_client()
-        yield event.plain_result(f"正在验证 PSN 账号 {online_id}，请稍候...")
+        wait_id = await self._send_progress(event, f"正在验证 PSN 账号 {online_id}，请稍候...")
 
         def _fallback():
             return {"profile": {"online_id": online_id, "avatar": ""}, "presence": {}, "trophy_summary": {}}
@@ -448,9 +722,11 @@ class PlayStationGamesPlugin(Star):
         try:
             profile = await client.get_full_profile(online_id)
         except PSNNotFound:
+            await self._recall_message(event, wait_id)
             yield event.plain_result(f"未找到 PSN 用户「{online_id}」，请检查在线 ID 是否正确（注意大小写）。")
             return
         except PSNAuthError as e:
+            await self._recall_message(event, wait_id)
             yield event.plain_result(f"认证失败：{e}\n请让管理员更新 NPSSO 令牌。")
             return
         except PSNForbidden:
@@ -464,6 +740,7 @@ class PlayStationGamesPlugin(Star):
         self.bindings[user_id] = online_id
         changed = self._link_user_to_group(user_id, group_id)
         self._save_bindings()
+        await self._recall_message(event, wait_id)
         name = profile.get("profile", {}).get("online_id", online_id)
         yield event.plain_result(f"✅ 绑定成功！已关联 PSN 账号：{name}。\n现在可以使用 /psn 查看资料啦。")
 
@@ -569,8 +846,9 @@ class PlayStationGamesPlugin(Star):
             yield event.plain_result(err or "未找到绑定的 PSN ID。请先 /绑定psn <ID>。")
             return
 
-        yield event.plain_result(f"正在查询 {online_id} 的资料...")
+        wait_id = await self._send_progress(event, f"正在查询 {online_id} 的资料...")
         img_url, err = await self._do_profile(online_id)
+        await self._recall_message(event, wait_id)
         if err:
             yield event.plain_result(err)
             return
@@ -636,8 +914,9 @@ class PlayStationGamesPlugin(Star):
             yield event.plain_result(err or "未找到绑定的 PSN ID。")
             return
 
-        yield event.plain_result(f"正在统计 {online_id} 的游戏库，请稍候...")
+        wait_id = await self._send_progress(event, f"正在统计 {online_id} 的游戏库，请稍候...")
         img_url, err = await self._do_library(online_id)
+        await self._recall_message(event, wait_id)
         if err:
             yield event.plain_result(err)
             return
@@ -695,23 +974,66 @@ class PlayStationGamesPlugin(Star):
 
     @staticmethod
     def _game_match_score(game_name: str, kw: str) -> int:
-        """按匹配质量打分，0 表示不匹配。分数越高越优先。"""
-        gn = (game_name or "").strip().lower()
-        k = (kw or "").strip().lower()
+        """模糊匹配打分，0 表示不匹配。分数越高越优先。
+
+        分层：精确 > 前缀 > 包含 > 内容词高相似 > 中文子串；
+        游戏名与关键词都先做归一化（全角半角/音标/版本号修饰/大小写/空格）。
+        若关键词带有版本号（2 / ii / 4 / vii / 2077 等）而游戏标题不含该版本，
+        则判为「版本不符」，直接否决，避免「美末2」误匹配到第一部。
+        """
+        raw_gn = (game_name or "").strip()
+        raw_kw = (kw or "").strip()
+        if not raw_gn or not raw_kw:
+            return 0
+
+        gn_l = raw_gn.lower()
+        k_l = raw_kw.lower()
+        gn = _norm_game(raw_gn)
+        k = _norm_game(raw_kw)
         if not gn or not k:
             return 0
-        if gn == k:
+
+        def cn_len(s: str) -> int:
+            return len(re.findall(r"[\u4e00-\u9fff]", s))
+
+        # 版本号一致性校验：关键词带版本号时，游戏标题必须含同一版本号
+        k_ver = _version_tokens(raw_kw)
+        if k_ver:
+            g_ver = _version_tokens(raw_gn)
+            if k_ver.isdisjoint(g_ver):
+                # 版本号冲突（如查「...2」却命中「...第一部/Part I」），否决
+                return 0
+
+        # 1) 原始精确 / 归一化后精确
+        if gn_l == k_l or gn == k:
             return 1000
-        if gn.startswith(k):
-            return 800
+        # 2) 前缀
+        if gn.startswith(k) or k.startswith(gn) or gn_l.startswith(k_l):
+            return 820
+        # 3) 双向包含（归一化后）
         if k in gn:
-            # 关键词越短越容易误命中，用长度做权重
-            return 500 + len(k)
-        # 分词子串匹配（中文/英文/数字段）
-        gnt = re.sub(r"[^0-9a-z\u4e00-\u9fff]+", " ", gn)
-        kt = re.sub(r"[^0-9a-z\u4e00-\u9fff]+", " ", k).strip()
-        if kt and kt in gnt:
-            return 300 + len(kt)
+            return 700 + len(k)
+        if gn in k:
+            return 680 + len(gn)
+        if k_l in gn_l:
+            return 660 + len(k_l)
+        # 4) 内容词相似度（英文/数字内容 token）
+        ct_g = _content_tokens(raw_gn)
+        ct_k = _content_tokens(raw_kw)
+        if ct_g and ct_k:
+            inter = ct_g & ct_k
+            union = ct_g | ct_k
+            # 关键词含数字（如 2077）但已在上面版本校验处理；这里看内容词
+            if inter:
+                jacc = len(inter) / len(union)
+                if jacc >= 0.5 and len(inter) >= 1:
+                    return int(420 + 400 * jacc) + 10 * len(inter)
+                # 少量内容词重合也给较低分（需至少 2 个，避免单单词误命中）
+                if len(inter) >= 2:
+                    return 220 + 10 * len(inter)
+        # 5) 中文关键词子串（要求至少 2 个汉字，避免单字误命中）
+        if cn_len(k) >= 2 and k.replace(" ", "") in gn.replace(" ", ""):
+            return 150 + len(k)
         return 0
 
     async def _find_game(self, online_id: str, keyword: str):
@@ -732,12 +1054,34 @@ class PlayStationGamesPlugin(Star):
                 trophy_by_name[nm] = tt
 
         scored = []
+        candidate_terms = _expand_game_keywords(keyword)
         for t in titles:
-            score = self._game_match_score(t.get("name"), keyword)
-            if score > 0:
-                scored.append((score, t))
+            best_score = 0
+            for term in candidate_terms:
+                s = self._game_match_score(t.get("name"), term)
+                if s > best_score:
+                    best_score = s
+            if best_score > 0:
+                scored.append((best_score, t))
         if not scored:
-            return None, None, titles
+            # 兜底：按字符相似度给出最近似的 4 个游戏名作为建议
+            kn = _norm_game(keyword)
+            near = []
+            for t in titles:
+                gn = _norm_game(t.get("name"))
+                if not gn:
+                    continue
+                # 简单共享子串评分
+                ov = 0
+                for n in range(2, min(6, len(kn)) + 1):
+                    for i in range(0, len(kn) - n + 1):
+                        if kn[i:i+n] in gn:
+                            ov += n
+                if ov > 0:
+                    near.append((ov, t.get("name")))
+            near.sort(reverse=True)
+            suggestions = [n for _ov, n in near[:4] if n]
+            return None, None, suggestions
         scored.sort(key=lambda x: (x[0], x[1].get("play_seconds", 0)), reverse=True)
         best = scored[0][1]
 
@@ -749,7 +1093,7 @@ class PlayStationGamesPlugin(Star):
                 if best_name in tn or tn in best_name:
                     trophy = tt
                     break
-        return best, trophy, titles
+        return best, trophy, []
 
     async def _do_game(
         self, online_id: str, keyword: str
@@ -761,7 +1105,7 @@ class PlayStationGamesPlugin(Star):
             return None, "请告诉我想查询的游戏名称，例如「查询 艾尔登法环 的游戏信息」。"
 
         try:
-            title, trophy, _titles = await self._find_game(online_id, keyword)
+            title, trophy, suggestions = await self._find_game(online_id, keyword)
         except PSNAuthError as e:
             return None, f"PSN 认证失败：{e}\n请重新获取 NPSSO 令牌并更新配置。"
         except PSNNotFound as e:
@@ -776,11 +1120,14 @@ class PlayStationGamesPlugin(Star):
             return None, f"查询游戏信息出错：{e}"
 
         if not title:
-            return (
-                None,
-                f"在 {online_id} 的游戏库中没有找到包含「{keyword}」的游戏。\n"
-                "PSN 仅统计 PS4 及以上且有游玩记录的游戏；也可能是名称不完全一致，换个关键词试试。",
-            )
+            tip = f"在 {online_id} 的游戏库中没有找到包含「{keyword}」的游戏。\n"
+            tip += "PSN 仅统计 PS4 及以上且有游玩记录的游戏。"
+            if suggestions:
+                tip += "\n你是不是想找：" + "、".join(suggestions) + "？\n"
+                tip += "可直接回复其中的名字，或换用游戏的英文名/俗称（如「老头环」「战神5」）试试。"
+            else:
+                tip += "可换用游戏的英文名或俗称（如「老头环」「战神5」）再试。"
+            return None, tip
 
         # 头像（取资料）
         avatar_uri = ""
@@ -844,8 +1191,9 @@ class PlayStationGamesPlugin(Star):
             yield event.plain_result(err or "未找到绑定的 PSN ID。")
             return
 
-        yield event.plain_result(f"正在获取 {online_id} 的奖杯数据...")
+        wait_id = await self._send_progress(event, f"正在获取 {online_id} 的奖杯数据...")
         img_url, err = await self._do_trophies(online_id)
+        await self._recall_message(event, wait_id)
         if err:
             yield event.plain_result(err)
             return
@@ -873,8 +1221,9 @@ class PlayStationGamesPlugin(Star):
             yield event.plain_result(perr)
             return
 
-        yield event.plain_result(f"正在查找 {online_id} 的游戏「{keyword}」...")
+        wait_id = await self._send_progress(event, f"正在查找 {online_id} 的游戏「{keyword}」...")
         img_url, err = await self._do_game(online_id, keyword)
+        await self._recall_message(event, wait_id)
         if err:
             yield event.plain_result(err)
             return
@@ -1067,8 +1416,9 @@ class PlayStationGamesPlugin(Star):
             self._save_bindings()
 
         sort_by = self.DIM_MAP.get((dimension or "时长").strip(), "time")
-        yield event.plain_result("正在统计群排行，请稍候...")
+        wait_id = await self._send_progress(event, "正在统计群排行，请稍候...")
         img_url, err, title, count = await self._do_ranking(gid, sort_by)
+        await self._recall_message(event, wait_id)
         if err:
             yield event.plain_result(err)
             return
@@ -1200,8 +1550,9 @@ class PlayStationGamesPlugin(Star):
             yield event.plain_result("不能和自己对比哦。")
             return
 
-        yield event.plain_result(f"正在对比 {my_id} 与 {target_id}...")
+        wait_id = await self._send_progress(event, f"正在对比 {my_id} 与 {target_id}...")
         img_url, err = await self._do_compare(my_id, target_id)
+        await self._recall_message(event, wait_id)
         if err:
             yield event.plain_result(err)
             return
@@ -1298,8 +1649,9 @@ class PlayStationGamesPlugin(Star):
             yield event.plain_result("请在群聊中使用该指令。")
             return
 
-        yield event.plain_result("正在分析群内 PSN 联动，可能需要一些时间...")
+        wait_id = await self._send_progress(event, "正在分析群内 PSN 联动，可能需要一些时间...")
         img_url, err = await self._do_network(gid)
+        await self._recall_message(event, wait_id)
         if err:
             yield event.plain_result(err)
             return
@@ -1371,8 +1723,9 @@ class PlayStationGamesPlugin(Star):
             yield event.plain_result("请在群聊中使用该指令。")
             return
 
-        yield event.plain_result("正在查看群友在线状态...")
+        wait_id = await self._send_progress(event, "正在查看群友在线状态...")
         img_url, err = await self._do_online(gid)
+        await self._recall_message(event, wait_id)
         if err:
             yield event.plain_result(err)
             return
@@ -1601,14 +1954,16 @@ class PlayStationGamesPlugin(Star):
                     self._save_bindings()
                 dim = self._detect_dimension(text)
                 sort_by = self.DIM_MAP.get(dim, "time")
-                yield event.plain_result("正在统计群排行，请稍候...")  # 进度：stop 前发送
+                wait_id = await self._send_progress(event, "正在统计群排行，请稍候...")
                 img_url, err, _t, _c = await self._do_ranking(gid, sort_by)
+                await self._recall_message(event, wait_id)
                 yield finish(event.plain_result(err) if err else event.image_result(img_url))
                 return
 
             if action == "online":
-                yield event.plain_result("正在查看群友在线状态...")  # 进度
+                wait_id = await self._send_progress(event, "正在查看群友在线状态...")
                 img_url, err = await self._do_online(gid)
+                await self._recall_message(event, wait_id)
                 yield finish(event.plain_result(err) if err else event.image_result(img_url))
                 return
 
@@ -1617,8 +1972,9 @@ class PlayStationGamesPlugin(Star):
                 if len(group_map) < 2:
                     yield finish(event.plain_result("群内至少需要 2 人绑定才能分析联动。"))
                     return
-                yield event.plain_result("正在分析群内 PSN 联动，可能需要一些时间...")  # 进度
+                wait_id = await self._send_progress(event, "正在分析群内 PSN 联动，可能需要一些时间...")
                 img_url, err = await self._do_network(gid)
+                await self._recall_message(event, wait_id)
                 yield finish(event.plain_result(err) if err else event.image_result(img_url))
                 return
 
@@ -1634,8 +1990,9 @@ class PlayStationGamesPlugin(Star):
                 if target_id.lower() == my_id.lower():
                     yield finish(event.plain_result("不能和自己对比哦。"))
                     return
-                yield event.plain_result(f"正在对比 {my_id} 与 {target_id}...")  # 进度
+                wait_id = await self._send_progress(event, f"正在对比 {my_id} 与 {target_id}...")
                 img_url, err = await self._do_compare(my_id, target_id)
+                await self._recall_message(event, wait_id)
                 yield finish(event.plain_result(err) if err else event.image_result(img_url))
                 return
 
@@ -1648,8 +2005,9 @@ class PlayStationGamesPlugin(Star):
                 if not keyword:
                     yield finish(event.plain_result("请告诉我想查询的游戏名称，例如「查 艾尔登法环 的游戏信息」。"))
                     return
-                yield event.plain_result(f"正在查找 {online_id} 的游戏「{keyword}」...")  # 进度
+                wait_id = await self._send_progress(event, f"正在查找 {online_id} 的游戏「{keyword}」...")
                 img_url, err = await self._do_game(online_id, keyword)
+                await self._recall_message(event, wait_id)
                 yield finish(event.plain_result(err) if err else event.image_result(img_url))
                 return
 
@@ -1660,14 +2018,15 @@ class PlayStationGamesPlugin(Star):
                 return
 
             if action == "library":
-                yield event.plain_result(f"正在统计 {online_id} 的游戏库，请稍候...")  # 进度
+                wait_id = await self._send_progress(event, f"正在统计 {online_id} 的游戏库，请稍候...")
                 img_url, err = await self._do_library(online_id)
             elif action == "trophies":
-                yield event.plain_result(f"正在获取 {online_id} 的奖杯数据...")  # 进度
+                wait_id = await self._send_progress(event, f"正在获取 {online_id} 的奖杯数据...")
                 img_url, err = await self._do_trophies(online_id)
             else:  # profile
-                yield event.plain_result(f"正在查询 {online_id} 的资料...")  # 进度
+                wait_id = await self._send_progress(event, f"正在查询 {online_id} 的资料...")
                 img_url, err = await self._do_profile(online_id)
+            await self._recall_message(event, wait_id)
             yield finish(event.plain_result(err) if err else event.image_result(img_url))
             return
 
@@ -1704,6 +2063,77 @@ class PlayStationGamesPlugin(Star):
             ).use_t2i(False)
         except Exception as e:
             yield event.plain_result(self._friendly_tool_error("绑定 PSN 账号", e))
+
+    # -------------------- 进度提示发送 / 撤回 --------------------
+    #
+    # 查询较慢时先给用户发一条「正在获取…」提示；结果发出后再把提示撤回，
+    # 让对话更干净。AstrBot 的 pipeline send 不回传 message_id，因此提示通过
+    # OneBot 底层 call_action 直接发送并捕获 message_id，再用 delete_msg 撤回。
+    # 不支持底层撤回的平台则静默降级（不撤回，提示保留）。
+    async def _send_progress(self, event: AstrMessageEvent, text: str):
+        """发送一条「正在…」进度提示，返回用于撤回的 message_id（拿不到则为 None）。
+
+        直接走 OneBot action，不走 pipeline，因此不会进入 RespondStage，
+        也不会触发 t2i/结果去重等装饰逻辑。
+        """
+        bot = getattr(event, "bot", None)
+        if not (bot and hasattr(bot, "call_action")):
+            # 非 OneBot 平台：退回普通 send（无法撤回）
+            try:
+                await event.send(event.plain_result(text))
+            except Exception:
+                pass
+            return None
+        try:
+            params = {"message": [{"type": "text", "data": {"text": text}}]}
+            gid = event.get_group_id()
+            if gid and str(gid).isdigit():
+                resp = await bot.call_action("send_group_msg", group_id=int(gid), **params)
+            else:
+                uid = event.get_sender_id()
+                resp = await bot.call_action("send_private_msg", user_id=int(uid), **params)
+            return self._extract_message_id(resp)
+        except Exception as e:
+            logger.debug(f"[PSN] 发送进度提示失败，改用 event.send：{e}")
+            try:
+                await event.send(event.plain_result(text))
+            except Exception:
+                pass
+            return None
+
+    async def _recall_message(self, event: AstrMessageEvent, message_id) -> None:
+        """撤回之前 _send_progress 发出的提示；失败静默。"""
+        if not message_id:
+            return
+        bot = getattr(event, "bot", None)
+        if not bot:
+            return
+        try:
+            if hasattr(bot, "delete_msg"):
+                await bot.delete_msg(message_id=message_id)
+            elif hasattr(bot, "call_action"):
+                await bot.call_action("delete_msg", message_id=message_id)
+            elif hasattr(bot, "recall_message"):
+                await bot.recall_message(int(message_id))
+        except Exception as e:
+            logger.debug(f"[PSN] 撤回进度提示失败（可忽略）：{e}")
+
+    @staticmethod
+    def _extract_message_id(resp):
+        """从 OneBot send_*_msg 返回值里提取 message_id。"""
+        if resp is None:
+            return None
+        if isinstance(resp, (int, str)):
+            return resp
+        if isinstance(resp, dict):
+            data = resp.get("data")
+            if isinstance(data, dict) and "message_id" in data:
+                return data["message_id"]
+            if "message_id" in resp:
+                return resp["message_id"]
+            if "id" in resp:
+                return resp["id"]
+        return getattr(resp, "message_id", None) or getattr(resp, "id", None)
 
     # 用一个足够宽的正则挂载分发器：覆盖 PSN / PlayStation / 奖杯 / 游戏库 / 绑定 等。
     # 是否真正命中由 _detect_intent 二次判定；不命中则不停止事件，正常交还给 LLM。
