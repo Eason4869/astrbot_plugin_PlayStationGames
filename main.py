@@ -51,7 +51,7 @@ ONLINE_STATUS_TEXT = {
     "astrbot_plugin_PlayStationGames",
     "Eason4869",
     "PlayStation玩家数据 — 绑定PSN账号，查询游戏库/游戏时间/奖杯、群内排行与对比（图片可视化）",
-    "1.2.0",
+    "1.2.1",
     "https://github.com/Eason4869/astrbot_plugin_PlayStationGames",
 )
 class PlayStationGamesPlugin(Star):
@@ -1655,7 +1655,7 @@ class PlayStationGamesPlugin(Star):
                 return
 
             if action == "game":
-                online_id, rerr = self._tool_resolve_target(event, "")
+                online_id, rerr = await self._tool_resolve_target(event, "")
                 if not online_id:
                     event.stop_event()
                     yield event.plain_result(rerr)
@@ -1675,7 +1675,7 @@ class PlayStationGamesPlugin(Star):
                 return
 
             # 资料 / 游戏库 / 奖杯：目标优先取 @，其次自己
-            online_id, rerr = self._tool_resolve_target(event, "")
+            online_id, rerr = await self._tool_resolve_target(event, "")
             if not online_id:
                 event.stop_event()
                 yield event.plain_result(rerr)
@@ -1965,7 +1965,7 @@ class PlayStationGamesPlugin(Star):
                 yield r
             return
         try:
-            online_id, rerr = self._tool_resolve_target(event, target or "")
+            online_id, rerr = await self._tool_resolve_target(event, target or "")
             if not online_id:
                 async for r in self._yield_tool_result(event, event.plain_result(rerr)):
                     yield r

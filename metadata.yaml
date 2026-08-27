@@ -14,7 +14,7 @@ desc: PlayStation（PSN）玩家数据可视化插件。绑定 PSN 在线 ID 后
 short_desc: 查询 PSN 游戏库/时长/奖杯/单款游戏详情、群排行对比，图片可视化，自然语言不依赖LLM
 
 # 语义化版本号
-version: 1.2.0
+version: 1.2.1
 
 # 作者
 author: Eason4869
