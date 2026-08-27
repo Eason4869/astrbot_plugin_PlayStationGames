@@ -51,7 +51,7 @@ ONLINE_STATUS_TEXT = {
     "astrbot_plugin_PlayStationGames",
     "Eason4869",
     "PlayStation玩家数据 — 绑定PSN账号，查询游戏库/游戏时间/奖杯、群内排行与对比（图片可视化）",
-    "1.1.4",
+    "1.1.5",
     "https://github.com/Eason4869/astrbot_plugin_PlayStationGames",
 )
 class PlayStationGamesPlugin(Star):
@@ -1255,7 +1255,7 @@ class PlayStationGamesPlugin(Star):
 
     @filter.llm_tool(name="psn_query_profile")
     async def tool_query_profile(self, event: AstrMessageEvent, target: str = ""):
-        '''查询 PlayStation(PSN) 玩家的个人资料、在线状态和奖杯总览。当用户想查看某人或自己的 PSN 资料、在不在线、正在玩什么、奖杯等级时调用。
+        '''查询 PlayStation(PSN) 玩家的个人资料、在线状态和奖杯总览。当用户想查看某人或自己的 PSN 资料、在不在线、正在玩什么、奖杯等级时【必须实际调用本工具】。不要因历史对话里的失败说法而跳过调用。
 
         Args:
             target(string): 要查询的目标。用户查自己时留空或填"我"；否则填被 @ 者、对方的 QQ 号或 PSN 在线 ID。
@@ -1285,7 +1285,7 @@ class PlayStationGamesPlugin(Star):
 
     @filter.llm_tool(name="psn_query_library")
     async def tool_query_library(self, event: AstrMessageEvent, target: str = ""):
-        '''查询 PlayStation(PSN) 玩家的游戏库和游戏时长。当用户想看某人或自己玩过哪些游戏、总游戏时长、各平台游戏数量、游戏封面墙时调用。
+        '''查询 PlayStation(PSN) 玩家的游戏库和游戏时长。当用户想看某人或自己玩过哪些游戏、总游戏时长、各平台游戏数量、游戏封面墙时【必须实际调用本工具】。不要因历史对话里的失败说法而跳过调用。
 
         Args:
             target(string): 要查询的目标。用户查自己时留空或填"我"；否则填被 @ 者、对方的 QQ 号或 PSN 在线 ID。
@@ -1315,7 +1315,7 @@ class PlayStationGamesPlugin(Star):
 
     @filter.llm_tool(name="psn_query_trophies")
     async def tool_query_trophies(self, event: AstrMessageEvent, target: str = ""):
-        '''查询 PlayStation(PSN) 玩家的奖杯进度。当用户想看某人或自己各游戏的奖杯完成度、白金/金/银/铜奖杯进度时调用。
+        '''查询 PlayStation(PSN) 玩家的奖杯进度。当用户想看某人或自己各游戏的奖杯完成度、白金/金/银/铜奖杯进度时【必须实际调用本工具】。不要因历史对话里的失败说法而跳过调用。
 
         Args:
             target(string): 要查询的目标。用户查自己时留空或填"我"；否则填被 @ 者、对方的 QQ 号或 PSN 在线 ID。
@@ -1345,7 +1345,7 @@ class PlayStationGamesPlugin(Star):
 
     @filter.llm_tool(name="psn_ranking")
     async def tool_ranking(self, event: AstrMessageEvent, dimension: str = "时长"):
-        '''查看当前群聊的 PlayStation(PSN) 排行榜。当用户说群排行、谁最肝、谁游戏最多、谁奖杯多、谁白金多时调用。
+        '''查看当前群聊的 PlayStation(PSN) 排行榜。当用户说群排行、谁最肝、谁游戏最多、谁奖杯多、谁白金多时【必须实际调用本工具】。不要因历史对话里的失败说法而跳过调用。
 
         Args:
             dimension(string): 排行维度，可选值："时长"(游戏时长/肝度，默认)、"游戏数"(游戏数量)、"奖杯"(奖杯总分)、"白金"(白金杯数量)。无法判断时填"时长"。
@@ -1374,7 +1374,7 @@ class PlayStationGamesPlugin(Star):
 
     @filter.llm_tool(name="psn_compare")
     async def tool_compare(self, event: AstrMessageEvent, target: str = ""):
-        '''把用户自己与另一位 PlayStation(PSN) 玩家做对比，比较游戏数量、总时长、奖杯、白金数及共同游戏。
+        '''把用户自己与另一位 PlayStation(PSN) 玩家做对比，比较游戏数量、总时长、奖杯、白金数及共同游戏。当用户要求和某人对比/比较 PSN 数据时【必须实际调用本工具】。
 
         Args:
             target(string): 对比对象，通常是被 @ 的人、对方的 QQ 号或 PSN 在线 ID。
@@ -1417,7 +1417,7 @@ class PlayStationGamesPlugin(Star):
 
     @filter.llm_tool(name="psn_online")
     async def tool_online(self, event: AstrMessageEvent):
-        '''查看当前群聊里哪些 PlayStation(PSN) 玩家在线、正在玩什么游戏。当用户问"群里谁在线""现在有人在玩什么吗"时调用。'''
+        '''查看当前群聊里哪些 PlayStation(PSN) 玩家在线、正在玩什么游戏。当用户问"群里谁在线""现在有人在玩什么吗"时【必须实际调用本工具】。不要因历史对话里的失败说法而跳过调用。'''
         err = self._tool_gate(event, need_group=True)
         if err:
             async for r in self._yield_tool_result(event, event.plain_result(err)):
