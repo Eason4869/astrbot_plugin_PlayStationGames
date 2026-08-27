@@ -2,7 +2,7 @@
     "npsso_token": {
         "description": "PSN 的 NPSSO 令牌（64 位）",
         "type": "string",
-        "hint": "必填。浏览器登录 https://my.account.sony.com/ 后访问 https://ca.account.sony.com/api/v1/ssocookie 复制 npsso 的值（约 64 位字符，有效期约几个月，过期后需重新获取）。",
+        "hint": "必填。先用浏览器登录 PlayStation 官网 https://www.playstation.com/zh-hans-cn/ （右上角登录你的 PSN 账号），然后访问 https://ca.account.sony.com/api/v1/ssocookie ，复制返回 JSON 里 npsso 的值（约 64 位字符，有效期约几个月，过期后需重新获取）。若打不开 ssocookie 页面，请在登录官网的同一浏览器中直接访问该地址。",
         "obvious_hint": true
     },
     "enabled_groups": {

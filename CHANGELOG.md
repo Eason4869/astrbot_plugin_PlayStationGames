@@ -1,5 +1,9 @@
 # 更新日志
 
+## v1.1.2
+
+- 文档/配置：NPSSO 获取指引中不可用的登录地址 `my.account.sony.com` 改为 PlayStation 中国官网 `https://www.playstation.com/zh-hans-cn/`，同步更新配置项提示与 README。
+
 ## v1.1.1
 
 - **修复 LLM 触发时机器人重复回复两条相同消息**：本地函数工具产出结果后，核心会立即直接发送，同时 RespondStage 又会把同一结果再发一遍。现统一走工具出口，登记已发送文本做去重，确保只发一次。
