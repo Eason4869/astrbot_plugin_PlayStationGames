@@ -50,7 +50,7 @@ ONLINE_STATUS_TEXT = {
     "astrbot_plugin_PlayStationGames",
     "Eason4869",
     "PlayStation玩家数据 — 绑定PSN账号，查询游戏库/游戏时间/奖杯、群内排行与对比（图片可视化）",
-    "1.1.2",
+    "1.1.3",
     "https://github.com/Eason4869/astrbot_plugin_PlayStationGames",
 )
 class PlayStationGamesPlugin(Star):
@@ -1166,7 +1166,7 @@ class PlayStationGamesPlugin(Star):
             return "该功能需要在群聊中使用。"
         return None
 
-    def _yield_tool_result(self, event: AstrMessageEvent, result):
+    async def _yield_tool_result(self, event: AstrMessageEvent, result):
         """LLM 工具统一出口：终止事件并产出一条结果。
 
         核心在调用本地 LLM 工具时会通过 ``event.send(type="tool_direct_result")``

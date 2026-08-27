@@ -1,5 +1,9 @@
 # 更新日志
 
+## v1.1.3
+
+- 修复 LLM 工具触发时报错「工具接口有点问题，暂时查不了」：v1.1.1 引入的统一工具出口 `_yield_tool_result` 误写为同步生成器却被 `async for` 迭代，导致 `TypeError: 'async for' requires ... got generator`。改为异步生成器，所有 LLM 工具（资料/游戏库/奖杯/排行/对比/在线/绑定）恢复正常。
+
 ## v1.1.2
 
 - 文档/配置：NPSSO 获取指引中不可用的登录地址 `my.account.sony.com` 改为 PlayStation 中国官网 `https://www.playstation.com/zh-hans-cn/`，同步更新配置项提示与 README。
