@@ -50,7 +50,7 @@ ONLINE_STATUS_TEXT = {
     "astrbot_plugin_PlayStationGames",
     "Eason4869",
     "PlayStation玩家数据 — 绑定PSN账号，查询游戏库/游戏时间/奖杯、群内排行与对比（图片可视化）",
-    "1.1.0",
+    "1.1.1",
     "https://github.com/Eason4869/astrbot_plugin_PlayStationGames",
 )
 class PlayStationGamesPlugin(Star):
@@ -1166,86 +1166,141 @@ class PlayStationGamesPlugin(Star):
             return "该功能需要在群聊中使用。"
         return None
 
+    def _yield_tool_result(self, event: AstrMessageEvent, result):
+        """LLM 工具统一出口：终止事件并产出一条结果。
+
+        核心在调用本地 LLM 工具时会通过 ``event.send(type="tool_direct_result")``
+        立即把结果发给用户；若不登记已发送的纯文本，RespondStage 会把同一结果再发一遍，
+        造成「机器人连续回复两条一样的消息」。这里复用核心的去重 extra 标记，确保只发一次。
+        """
+        event.stop_event()
+        try:
+            plain = (result.get_plain_text() or "").strip()
+        except Exception:
+            plain = ""
+        if plain:
+            try:
+                sent = event.get_extra("_send_message_to_user_current_session_plain_texts", [])
+                if not isinstance(sent, list):
+                    sent = []
+                if plain not in sent:
+                    sent.append(plain)
+                event.set_extra("_send_message_to_user_current_session_plain_texts", sent)
+            except Exception:
+                pass
+        yield result
+
+    def _refers_to_self(self, event: AstrMessageEvent, text: str) -> bool:
+        """判断 LLM 传来的目标文本是否其实指的是用户自己。
+
+        LLM 经常把「我的」「我」或发起人自己的群昵称当作 target 传入，这些并非 PSN ID，
+        若直接拿去查询会误报「用户不存在」。命中自身时应回退到发起人自己的绑定。
+        """
+        t = (text or "").strip()
+        if not t:
+            return True
+        if t.lower() in {"我", "自己", "我自己", "我的", "me", "my", "myself", "self"}:
+            return True
+        sender_id = str(event.get_sender_id())
+        # 纯数字且就是发起人自己的 QQ 号
+        if t.isdigit() and t == sender_id:
+            return True
+        # 去掉常见自称前缀后，与发起人群昵称一致
+        try:
+            sender_name = (event.get_sender_name() or "").strip()
+        except Exception:
+            sender_name = ""
+        cleaned = re.sub(r"^(我的|我|帮我|查一下|查下|看看|看下|查询)", "", t).strip()
+        if sender_name and (cleaned == sender_name or t == sender_name):
+            return True
+        return False
+
+    async def _tool_resolve_target(self, event: AstrMessageEvent, target: str):
+        """LLM 工具专用的目标解析：target 指自己时回退到本人绑定。
+
+        返回 (online_id, error)。
+        """
+        if self._refers_to_self(event, target or ""):
+            online_id = self.bindings.get(str(event.get_sender_id()))
+            if online_id:
+                return online_id, None
+            return None, "未找到绑定的 PSN ID。请先使用 /绑定psn <PSN在线ID> 绑定，或直接说「绑定psn，ID是你的PSN在线ID」。"
+        return self._resolve_target(event, target or "", fallback=True)
+
     @filter.llm_tool(name="psn_query_profile")
     async def tool_query_profile(self, event: AstrMessageEvent, target: str = ""):
         '''查询 PlayStation(PSN) 玩家的个人资料、在线状态和奖杯总览。当用户想查看某人或自己的 PSN 资料、在不在线、正在玩什么、奖杯等级时调用。
 
         Args:
-            target(string): 要查询的目标。可为空(表示查询用户自己)、PSN 在线 ID、或对方的群昵称/QQ号。若消息中 @ 了某人，留空即可，会自动识别被 @ 的人。
+            target(string): 要查询的目标。用户查自己时留空或填"我"；否则填被 @ 者、对方的 QQ 号或 PSN 在线 ID。
         '''
         err = self._tool_gate(event)
         if err:
-            event.stop_event()
-            yield event.plain_result(err)
+            async for r in self._yield_tool_result(event, event.plain_result(err)):
+                yield r
             return
-        online_id, rerr = self._resolve_target(event, target or "", fallback=True)
+        online_id, rerr = await self._tool_resolve_target(event, target or "")
         if not online_id:
-            event.stop_event()
-            yield event.plain_result(
-                rerr or "未找到绑定的 PSN ID。请先使用 /绑定psn <PSN在线ID> 绑定。"
-            )
+            async for r in self._yield_tool_result(event, event.plain_result(rerr)):
+                yield r
             return
         img_url, serr = await self._do_profile(online_id)
         if serr:
-            event.stop_event()
-            yield event.plain_result(serr)
+            async for r in self._yield_tool_result(event, event.plain_result(serr)):
+                yield r
             return
-        event.stop_event()
-        yield event.image_result(img_url)
+        async for r in self._yield_tool_result(event, event.image_result(img_url)):
+            yield r
 
     @filter.llm_tool(name="psn_query_library")
     async def tool_query_library(self, event: AstrMessageEvent, target: str = ""):
         '''查询 PlayStation(PSN) 玩家的游戏库和游戏时长。当用户想看某人或自己玩过哪些游戏、总游戏时长、各平台游戏数量、游戏封面墙时调用。
 
         Args:
-            target(string): 要查询的目标。可为空(查询自己)、PSN 在线 ID、或对方的群昵称/QQ号。若消息中 @ 了某人，留空即可自动识别。
+            target(string): 要查询的目标。用户查自己时留空或填"我"；否则填被 @ 者、对方的 QQ 号或 PSN 在线 ID。
         '''
         err = self._tool_gate(event)
         if err:
-            event.stop_event()
-            yield event.plain_result(err)
+            async for r in self._yield_tool_result(event, event.plain_result(err)):
+                yield r
             return
-        online_id, rerr = self._resolve_target(event, target or "", fallback=True)
+        online_id, rerr = await self._tool_resolve_target(event, target or "")
         if not online_id:
-            event.stop_event()
-            yield event.plain_result(
-                rerr or "未找到绑定的 PSN ID。请先使用 /绑定psn <PSN在线ID> 绑定。"
-            )
+            async for r in self._yield_tool_result(event, event.plain_result(rerr)):
+                yield r
             return
         img_url, serr = await self._do_library(online_id)
         if serr:
-            event.stop_event()
-            yield event.plain_result(serr)
+            async for r in self._yield_tool_result(event, event.plain_result(serr)):
+                yield r
             return
-        event.stop_event()
-        yield event.image_result(img_url)
+        async for r in self._yield_tool_result(event, event.image_result(img_url)):
+            yield r
 
     @filter.llm_tool(name="psn_query_trophies")
     async def tool_query_trophies(self, event: AstrMessageEvent, target: str = ""):
         '''查询 PlayStation(PSN) 玩家的奖杯进度。当用户想看某人或自己各游戏的奖杯完成度、白金/金/银/铜奖杯进度时调用。
 
         Args:
-            target(string): 要查询的目标。可为空(查询自己)、PSN 在线 ID、或对方的群昵称/QQ号。若消息中 @ 了某人，留空即可自动识别。
+            target(string): 要查询的目标。用户查自己时留空或填"我"；否则填被 @ 者、对方的 QQ 号或 PSN 在线 ID。
         '''
         err = self._tool_gate(event)
         if err:
-            event.stop_event()
-            yield event.plain_result(err)
+            async for r in self._yield_tool_result(event, event.plain_result(err)):
+                yield r
             return
-        online_id, rerr = self._resolve_target(event, target or "", fallback=True)
+        online_id, rerr = await self._tool_resolve_target(event, target or "")
         if not online_id:
-            event.stop_event()
-            yield event.plain_result(
-                rerr or "未找到绑定的 PSN ID。请先使用 /绑定psn <PSN在线ID> 绑定。"
-            )
+            async for r in self._yield_tool_result(event, event.plain_result(rerr)):
+                yield r
             return
         img_url, serr = await self._do_trophies(online_id)
         if serr:
-            event.stop_event()
-            yield event.plain_result(serr)
+            async for r in self._yield_tool_result(event, event.plain_result(serr)):
+                yield r
             return
-        event.stop_event()
-        yield event.image_result(img_url)
+        async for r in self._yield_tool_result(event, event.image_result(img_url)):
+            yield r
 
     @filter.llm_tool(name="psn_ranking")
     async def tool_ranking(self, event: AstrMessageEvent, dimension: str = "时长"):
@@ -1256,8 +1311,8 @@ class PlayStationGamesPlugin(Star):
         '''
         err = self._tool_gate(event, need_group=True)
         if err:
-            event.stop_event()
-            yield event.plain_result(err)
+            async for r in self._yield_tool_result(event, event.plain_result(err)):
+                yield r
             return
         gid = str(event.get_group_id() or "")
         if self._link_user_to_group(str(event.get_sender_id()), gid):
@@ -1265,90 +1320,121 @@ class PlayStationGamesPlugin(Star):
         sort_by = self.DIM_MAP.get((dimension or "时长").strip(), "time")
         img_url, serr, _title, _count = await self._do_ranking(gid, sort_by)
         if serr:
-            event.stop_event()
-            yield event.plain_result(serr)
+            async for r in self._yield_tool_result(event, event.plain_result(serr)):
+                yield r
             return
-        event.stop_event()
-        yield event.image_result(img_url)
+        async for r in self._yield_tool_result(event, event.image_result(img_url)):
+            yield r
 
     @filter.llm_tool(name="psn_compare")
     async def tool_compare(self, event: AstrMessageEvent, target: str = ""):
         '''把用户自己与另一位 PlayStation(PSN) 玩家做对比，比较游戏数量、总时长、奖杯、白金数及共同游戏。
 
         Args:
-            target(string): 对比对象，通常是被 @ 的人、对方的 PSN 在线 ID 或 QQ号。
+            target(string): 对比对象，通常是被 @ 的人、对方的 QQ 号或 PSN 在线 ID。
         '''
         err = self._tool_gate(event)
         if err:
-            event.stop_event()
-            yield event.plain_result(err)
+            async for r in self._yield_tool_result(event, event.plain_result(err)):
+                yield r
             return
         my_id = self.bindings.get(str(event.get_sender_id()))
         if not my_id:
-            event.stop_event()
-            yield event.plain_result("你还没有绑定 PSN ID，请先使用 /绑定psn <PSN在线ID>。")
+            async for r in self._yield_tool_result(
+                event, event.plain_result("你还没有绑定 PSN ID，请先说「绑定psn，ID是你的PSN在线ID」，或使用 /绑定psn <PSN在线ID>。")
+            ):
+                yield r
             return
         target_id, rerr = self._resolve_target(event, target or "", fallback=False)
         if not target_id:
-            event.stop_event()
-            yield event.plain_result(
-                rerr or "请指定对比对象，可以 @ 某人或告诉我对方的 PSN 在线 ID。"
-            )
+            async for r in self._yield_tool_result(
+                event, event.plain_result(rerr or "请指定对比对象，可以 @ 某人或告诉我对方的 PSN 在线 ID。")
+            ):
+                yield r
             return
         if target_id.lower() == my_id.lower():
-            event.stop_event()
-            yield event.plain_result("不能和自己对比哦。")
+            async for r in self._yield_tool_result(event, event.plain_result("不能和自己对比哦。")):
+                yield r
             return
         img_url, serr = await self._do_compare(my_id, target_id)
         if serr:
-            event.stop_event()
-            yield event.plain_result(serr)
+            async for r in self._yield_tool_result(event, event.plain_result(serr)):
+                yield r
             return
-        event.stop_event()
-        yield event.image_result(img_url)
+        async for r in self._yield_tool_result(event, event.image_result(img_url)):
+            yield r
 
     @filter.llm_tool(name="psn_online")
     async def tool_online(self, event: AstrMessageEvent):
         '''查看当前群聊里哪些 PlayStation(PSN) 玩家在线、正在玩什么游戏。当用户问"群里谁在线""现在有人在玩什么吗"时调用。'''
         err = self._tool_gate(event, need_group=True)
         if err:
-            event.stop_event()
-            yield event.plain_result(err)
+            async for r in self._yield_tool_result(event, event.plain_result(err)):
+                yield r
             return
         gid = str(event.get_group_id() or "")
         img_url, serr = await self._do_online(gid)
         if serr:
-            event.stop_event()
-            yield event.plain_result(serr)
+            async for r in self._yield_tool_result(event, event.plain_result(serr)):
+                yield r
             return
-        event.stop_event()
-        yield event.image_result(img_url)
+        async for r in self._yield_tool_result(event, event.image_result(img_url)):
+            yield r
 
-    @filter.llm_tool(name="psn_bind_help")
-    async def tool_bind_help(self, event: AstrMessageEvent, online_id: str = ""):
-        '''了解或执行 PlayStation(PSN) 账号绑定。当用户想绑定 PSN、询问怎么绑定、或给出了自己的 PSN 在线 ID 要求绑定时调用。
+    @filter.llm_tool(name="psn_bind")
+    async def tool_bind(self, event: AstrMessageEvent, online_id: str = ""):
+        '''绑定用户自己的 PlayStation(PSN) 账号。当用户说"绑定psn""我的PSN ID是xxx""帮我绑定PSN账号xxx"时调用。会校验该 PSN 在线 ID 是否存在，存在则直接完成绑定。
 
         Args:
-            online_id(string): 用户的 PSN 在线 ID。若用户只是询问怎么绑定而未提供 ID，则留空。
+            online_id(string): 用户提供的 PSN 在线 ID（必填）。若用户只是问怎么绑定而没给 ID，则留空。
         '''
         err = self._tool_gate(event)
         if err:
-            event.stop_event()
-            yield event.plain_result(err)
+            async for r in self._yield_tool_result(event, event.plain_result(err)):
+                yield r
             return
+        online_id = self._strip_at_text((online_id or "").strip())
         if not online_id:
-            event.stop_event()
-            yield event.plain_result(
-                "绑定 PSN 账号请使用指令：/绑定psn 你的PSN在线ID\n"
-                "例如：/绑定psn XiaoMing\n"
-                "绑定后即可用自然语言或 /psn 查询资料、游戏库、奖杯等。"
-            ).use_t2i(False)
+            async for r in self._yield_tool_result(
+                event,
+                event.plain_result(
+                    "绑定 PSN 账号请告诉我你的 PSN 在线 ID，例如直接说「绑定psn，ID是 XiaoMing」。\n"
+                    "绑定后即可用自然语言或 /psn 查询资料、游戏库、奖杯等。"
+                ).use_t2i(False),
+            ):
+                yield r
             return
-        # 直接引导用户走标准绑定指令（绑定需要校验，复用已有指令最稳妥）
-        event.stop_event()
-        yield event.plain_result(
-            f"好的，请发送以下指令完成绑定（会校验该 PSN ID 是否存在）：\n/绑定psn {online_id}"
-        ).use_t2i(False)
+
+        client = await self._get_client()
+        try:
+            profile = await client.get_full_profile(online_id)
+        except PSNNotFound:
+            async for r in self._yield_tool_result(
+                event,
+                event.plain_result(f"未找到 PSN 用户「{online_id}」，请检查在线 ID 是否正确（注意大小写）。"),
+            ):
+                yield r
+            return
+        except PSNAuthError as e:
+            async for r in self._yield_tool_result(
+                event, event.plain_result(f"认证失败：{e}\n请让管理员更新 NPSSO 令牌。")
+            ):
+                yield r
+            return
+        except (PSNForbidden, PSNClientError) as e:
+            # 资料私密或部分接口受限，但 ID 存在，仍允许绑定
+            logger.warning(f"[PSN] LLM 绑定时部分数据获取失败，允许绑定：{e}")
+            profile = {"profile": {"online_id": online_id}}
+
+        user_id = str(event.get_sender_id())
+        self.bindings[user_id] = online_id
+        self._link_user_to_group(user_id, event.get_group_id())
+        self._save_bindings()
+        name = (profile.get("profile", {}) or {}).get("online_id", online_id)
+        async for r in self._yield_tool_result(
+            event, event.plain_result(f"✅ 绑定成功！已关联 PSN 账号：{name}。现在可以直接问我 PSN 相关问题啦。").use_t2i(False)
+        ):
+            yield r
 
     # -------------------- 生命周期 --------------------
 
