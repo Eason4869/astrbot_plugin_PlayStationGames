@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body {
+    font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+    background:linear-gradient(135deg,#101a3a,#0a0f1f 55%,#1a1033);
+    color:#fff; width:820px; padding:34px;
+  }
+  .wrap { display:flex; flex-direction:column; gap:20px; }
+  .head { display:flex; align-items:center; gap:16px; }
+  .avatar { width:54px; height:54px; border-radius:50%; border:2px solid #fff; object-fit:cover; background:#222;}
+  .head .who { font-size:14px; color:#9fb0d6; }
+  .head .h-title { font-size:14px; color:#c7d2f0; }
+  .card {
+    display:flex; gap:22px;
+    background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.09);
+    border-radius:18px; padding:22px;
+  }
+  .cover { width:168px; height:168px; border-radius:14px; object-fit:cover; background:#222; flex-shrink:0;}
+  .info { flex:1; min-width:0; display:flex; flex-direction:column; gap:10px;}
+  .gname { font-size:26px; font-weight:800; line-height:1.25; word-break:break-all;}
+  .plat {
+    display:inline-block; align-self:flex-start; font-size:12px;
+    background:rgba(124,58,237,0.25); border:1px solid rgba(192,132,252,0.4);
+    color:#d8b4fe; border-radius:999px; padding:3px 12px;
+  }
+  .bigtime { font-size:34px; font-weight:800; color:#f7c873; line-height:1;}
+  .bigtime .unit { font-size:14px; color:#9fb0d6; font-weight:600; margin-left:6px;}
+  .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+  .st {
+    background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08);
+    border-radius:14px; padding:14px; text-align:center;
+  }
+  .st .v { font-size:20px; font-weight:800; }
+  .st .l { font-size:11px; color:#9fb0d6; margin-top:3px;}
+  .tcard {
+    background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.09);
+    border-radius:18px; padding:20px 22px;
+  }
+  .tcard .tt { font-size:15px; font-weight:700; margin-bottom:14px; color:#e5e7eb;}
+  .trow { display:flex; align-items:center; gap:16px;}
+  .pbar { flex:1; height:12px; background:rgba(255,255,255,0.12); border-radius:999px; overflow:hidden;}
+  .pfill { height:100%; background:linear-gradient(90deg,#7c3aed,#c084fc);}
+  .pct { font-size:22px; font-weight:800; min-width:90px; text-align:right;}
+  .tcounts { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-top:16px;}
+  .tc { text-align:center; background:rgba(255,255,255,0.04); border-radius:12px; padding:10px;}
+  .tc .n { font-size:20px; font-weight:800;}
+  .tc .l { font-size:11px; color:#9fb0d6;}
+  .notrophy { color:#8da0c6; font-size:13px; }
+  .footer { text-align:center; color:#5d6b8c; font-size:11px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">
+    {% if avatar_uri %}<img class="avatar" src="{{ avatar_uri }}">{% else %}<div class="avatar"></div>{% endif %}
+    <div>
+      <div class="h-title">游戏信息 · {{ online_id }}</div>
+      <div class="who">关键词：{{ keyword }}</div>
+    </div>
+  </div>
+
+  <div class="card">
+    {% if game.icon_uri %}<img class="cover" src="{{ game.icon_uri }}">{% else %}<div class="cover"></div>{% endif %}
+    <div class="info">
+      <div class="gname">{{ game.name }}</div>
+      <span class="plat">{{ game.platform }}</span>
+      <div class="bigtime">{{ game.play_hours }}<span class="unit">小时</span></div>
+      <div style="color:#9fb0d6;font-size:13px;">累计游玩 {{ game.play_time_str }}</div>
+    </div>
+  </div>
+
+  <div class="stats">
+    <div class="st"><div class="v">{{ game.play_count if game.play_count is not none else '—' }}</div><div class="l">启动次数</div></div>
+    <div class="st"><div class="v" style="font-size:15px;">{{ game.first_played }}</div><div class="l">首次游玩</div></div>
+    <div class="st"><div class="v" style="font-size:15px;">{{ game.last_played }}</div><div class="l">最近游玩</div></div>
+  </div>
+
+  {% if trophy %}
+  <div class="tcard">
+    <div class="tt">🏆 奖杯进度{% if trophy.platforms_str %} · {{ trophy.platforms_str }}{% endif %}</div>
+    <div class="trow">
+      <div class="pbar"><div class="pfill" style="width:{{ trophy.progress }}%"></div></div>
+      <div class="pct">{{ trophy.progress }}%</div>
+    </div>
+    <div style="text-align:right;color:#9fb0d6;font-size:12px;margin-top:6px;">已获得 {{ trophy.earned_total }} / {{ trophy.defined_total }} 个奖杯</div>
+    <div class="tcounts">
+      <div class="tc"><div class="n" style="color:#e5e7eb">{{ trophy.earned.platinum }}</div><div class="l">🏆 白金</div></div>
+      <div class="tc"><div class="n" style="color:#fbbf24">{{ trophy.earned.gold }}</div><div class="l">🥇 金</div></div>
+      <div class="tc"><div class="n" style="color:#cbd5e1">{{ trophy.earned.silver }}</div><div class="l">🥈 银</div></div>
+      <div class="tc"><div class="n" style="color:#d97706">{{ trophy.earned.bronze }}</div><div class="l">🥉 铜</div></div>
+    </div>
+  </div>
+  {% else %}
+  <div class="tcard notrophy">该游戏暂无奖杯记录（可能不支持奖杯或未获得过奖杯）。</div>
+  {% endif %}
+
+  <div class="footer">PlayStation Game Info · 数据由 PSNAWP 提供</div>
+</div>
+</body>
+</html>

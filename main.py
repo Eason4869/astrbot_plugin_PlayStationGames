@@ -51,7 +51,7 @@ ONLINE_STATUS_TEXT = {
     "astrbot_plugin_PlayStationGames",
     "Eason4869",
     "PlayStation玩家数据 — 绑定PSN账号，查询游戏库/游戏时间/奖杯、群内排行与对比（图片可视化）",
-    "1.1.5",
+    "1.2.0",
     "https://github.com/Eason4869/astrbot_plugin_PlayStationGames",
 )
 class PlayStationGamesPlugin(Star):
@@ -401,6 +401,7 @@ class PlayStationGamesPlugin(Star):
             "  /psn [@某人或ID]      查看个人资料/在线状态/奖杯总览\n"
             "  /psn游戏库 [@某人]    查看游戏库与游戏时间\n"
             "  /psn奖杯 [@某人]      查看各游戏奖杯进度\n"
+            "  /psn游戏 <游戏名>     查看指定游戏的时长/奖杯详情\n"
             "【群互动】\n"
             "  /psn排行 [游戏数|时长|奖杯|白金]  本群排行榜\n"
             "  /psn对比 @某人        与群友对比游戏库/奖杯\n"
@@ -690,6 +691,146 @@ class PlayStationGamesPlugin(Star):
         img_url = await self._render("trophies.html", render, width=880)
         return img_url, None
 
+    # -------------------- 指定游戏详情 --------------------
+
+    @staticmethod
+    def _game_match_score(game_name: str, kw: str) -> int:
+        """按匹配质量打分，0 表示不匹配。分数越高越优先。"""
+        gn = (game_name or "").strip().lower()
+        k = (kw or "").strip().lower()
+        if not gn or not k:
+            return 0
+        if gn == k:
+            return 1000
+        if gn.startswith(k):
+            return 800
+        if k in gn:
+            # 关键词越短越容易误命中，用长度做权重
+            return 500 + len(k)
+        # 分词子串匹配（中文/英文/数字段）
+        gnt = re.sub(r"[^0-9a-z\u4e00-\u9fff]+", " ", gn)
+        kt = re.sub(r"[^0-9a-z\u4e00-\u9fff]+", " ", k).strip()
+        if kt and kt in gnt:
+            return 300 + len(kt)
+        return 0
+
+    async def _find_game(self, online_id: str, keyword: str):
+        """在用户游戏库中按关键词查找游戏，合并奖杯信息。
+
+        返回 (title_dict, trophy_dict_or_None, all_titles)；未找到时 title_dict 为 None。
+        """
+        client = await self._get_client()
+        titles = await client.get_title_stats(online_id)
+        trophy_titles = await client.get_trophy_titles(online_id)
+
+        # 奖杯数据按游戏名建索引（两个接口的游戏名一致；title_id 与
+        # np_communication_id 是不同标识，不能直接关联）
+        trophy_by_name = {}
+        for tt in trophy_titles:
+            nm = (tt.get("title_name") or "").strip().lower()
+            if nm:
+                trophy_by_name[nm] = tt
+
+        scored = []
+        for t in titles:
+            score = self._game_match_score(t.get("name"), keyword)
+            if score > 0:
+                scored.append((score, t))
+        if not scored:
+            return None, None, titles
+        scored.sort(key=lambda x: (x[0], x[1].get("play_seconds", 0)), reverse=True)
+        best = scored[0][1]
+
+        # 精确名 -> 包含式回退匹配奖杯
+        best_name = (best.get("name") or "").strip().lower()
+        trophy = trophy_by_name.get(best_name)
+        if not trophy and best_name:
+            for tn, tt in trophy_by_name.items():
+                if best_name in tn or tn in best_name:
+                    trophy = tt
+                    break
+        return best, trophy, titles
+
+    async def _do_game(
+        self, online_id: str, keyword: str
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """查询指定游戏详情，返回 (图片路径, 错误信息)。"""
+        client = await self._get_client()
+        keyword = (keyword or "").strip()
+        if not keyword:
+            return None, "请告诉我想查询的游戏名称，例如「查询 艾尔登法环 的游戏信息」。"
+
+        try:
+            title, trophy, _titles = await self._find_game(online_id, keyword)
+        except PSNAuthError as e:
+            return None, f"PSN 认证失败：{e}\n请重新获取 NPSSO 令牌并更新配置。"
+        except PSNNotFound as e:
+            return None, f"未找到该 PSN 用户：{e}"
+        except PSNForbidden as e:
+            return None, f"该用户资料私密，无法查询：{e}"
+        except PSNClientError as e:
+            logger.error(f"[PSN] 查询游戏详情接口错误：{e}")
+            return None, f"查询失败：{e}"
+        except Exception as e:
+            logger.error(f"[PSN] 查询游戏详情失败：{e}", exc_info=True)
+            return None, f"查询游戏信息出错：{e}"
+
+        if not title:
+            return (
+                None,
+                f"在 {online_id} 的游戏库中没有找到包含「{keyword}」的游戏。\n"
+                "PSN 仅统计 PS4 及以上且有游玩记录的游戏；也可能是名称不完全一致，换个关键词试试。",
+            )
+
+        # 头像（取资料）
+        avatar_uri = ""
+        avatar_url = ""
+        try:
+            full = await client.get_full_profile(online_id)
+            avatar_url = (full.get("profile") or {}).get("avatar", "")
+        except Exception:
+            full = None
+        if avatar_url:
+            avatar_uri = await self.media.fetch(avatar_url)
+
+        icon_uri = await self.media.fetch(title.get("image_url"))
+        play_seconds = title.get("play_seconds", 0)
+
+        trophy_block = None
+        if trophy:
+            icon_uri = icon_uri or await self.media.fetch(trophy.get("title_icon_url"))
+            earned = trophy.get("earned", {})
+            defined = trophy.get("defined", {})
+            trophy_block = {
+                "progress": trophy.get("progress", 0) or 0,
+                "platforms_str": " / ".join(trophy.get("platforms", []) or []),
+                "earned_total": self._trophy_total(earned),
+                "defined_total": self._trophy_total(defined),
+                "earned": earned,
+                "defined": defined,
+                "trophy_meta": TROPHY_META,
+                "score": self._trophy_score(earned),
+            }
+
+        render = {
+            "online_id": online_id,
+            "avatar_uri": avatar_uri,
+            "keyword": keyword,
+            "game": {
+                "name": title.get("name"),
+                "icon_uri": icon_uri,
+                "platform": title.get("platform") or "未知",
+                "play_time_str": self._format_seconds(play_seconds),
+                "play_hours": title.get("play_hours", 0),
+                "play_count": title.get("play_count"),
+                "first_played": title.get("first_played") or "—",
+                "last_played": title.get("last_played") or "—",
+            },
+            "trophy": trophy_block,
+        }
+        img_url = await self._render("game.html", render, width=820)
+        return img_url, None
+
     @filter.command("psn奖杯", prefix_optional=True)
     async def cmd_trophies(self, event: AstrMessageEvent, arg: str = ""):
         """查看各游戏奖杯进度。"""
@@ -709,6 +850,89 @@ class PlayStationGamesPlugin(Star):
             yield event.plain_result(err)
             return
         yield event.image_result(img_url)
+
+    # -------------------- 指定游戏 --------------------
+
+    @filter.command("psn游戏", prefix_optional=True)
+    async def cmd_game(self, event: AstrMessageEvent, args: str = ""):
+        """查询指定游戏的游玩/奖杯信息。
+
+        用法：
+          /psn游戏 <游戏名关键词>              查自己
+          /psn游戏 @某人 <游戏名关键词>        查被@的人
+          /psn游戏 <PSN在线ID> <游戏名关键词>   查指定 ID
+        """
+        self._log_usage(event, "psn游戏", args)
+        ok, msg = self._gate(event)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+
+        online_id, keyword, perr = self._parse_game_args(event, args or "")
+        if perr:
+            yield event.plain_result(perr)
+            return
+
+        yield event.plain_result(f"正在查找 {online_id} 的游戏「{keyword}」...")
+        img_url, err = await self._do_game(online_id, keyword)
+        if err:
+            yield event.plain_result(err)
+            return
+        yield event.image_result(img_url)
+
+    def _parse_game_args(
+        self, event: AstrMessageEvent, text: str
+    ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+        """解析「目标 + 游戏名」参数，返回 (online_id, keyword, error)。"""
+        # 1) 优先处理消息链里的 @ 提及
+        at_targets = self._extract_at_targets(event)
+        cleaned = self._strip_at_text(text or "").strip()
+        if at_targets:
+            target_id = None
+            for qid in at_targets:
+                if self.bindings.get(qid):
+                    target_id = self.bindings[qid]
+                    break
+            if not target_id:
+                return None, None, "被 @ 的用户还没有绑定 PSN 账号，请提醒 TA 先使用 /绑定psn <PSN在线ID>。"
+            keyword = cleaned.strip()
+            if not keyword:
+                return None, None, "请告诉我想查询的游戏名称，例如「/psn游戏 艾尔登法环」。"
+            return target_id, keyword, None
+
+        # 2) 纯文本：可能首段是 PSN ID / QQ 号，其余是游戏名
+        parts = [p for p in cleaned.split() if p]
+        if not parts:
+            online_id = self.bindings.get(str(event.get_sender_id()))
+            if not online_id:
+                return None, None, "请先使用 /绑定psn <PSN在线ID> 绑定账号，或告诉我游戏名称，例如「/psn游戏 艾尔登法环」。"
+            return None, None, "请告诉我想查询的游戏名称，例如「/psn游戏 艾尔登法环」。"
+
+        # 整段作为游戏名、查自己（最常见）
+        if len(parts) == 1:
+            online_id = self.bindings.get(str(event.get_sender_id()))
+            if not online_id:
+                return None, None, "你还没有绑定 PSN ID。请先 /绑定psn <PSN在线ID>，或使用「/psn游戏 @某人 游戏名」。"
+            return online_id, parts[0], None
+
+        # 多段：尝试把第一段当作目标
+        first = parts[0]
+        rest = " ".join(parts[1:]).strip()
+        target_oid = None
+        if first.isdigit() and first in self.bindings:
+            target_oid = self.bindings[first]
+        else:
+            # 第一段若是已知的群成员 PSN ID 则用之，否则把整段都当游戏名查自己
+            known_ids = {v.lower(): v for v in self.bindings.values()}
+            target_oid = known_ids.get(first.lower())
+        if target_oid and rest:
+            return target_oid, rest, None
+
+        # 兜底：整段都是游戏名，查自己
+        online_id = self.bindings.get(str(event.get_sender_id()))
+        if not online_id:
+            return None, None, "你还没有绑定 PSN ID。请先 /绑定psn <PSN在线ID>。"
+        return online_id, cleaned, None
 
     # -------------------- 群排行 --------------------
 
@@ -985,27 +1209,13 @@ class PlayStationGamesPlugin(Star):
 
     # -------------------- 群联动 --------------------
 
-    @filter.command("psn联动", prefix_optional=True)
-    async def cmd_network(self, event: AstrMessageEvent):
-        """群内 PSN 联动：好友关系与共同游戏。"""
-        self._log_usage(event, "psn联动")
-        ok, msg = self._gate(event)
-        if not ok:
-            yield event.plain_result(msg)
-            return
-        gid = str(event.get_group_id() or "")
-        if not gid:
-            yield event.plain_result("请在群聊中使用该指令。")
-            return
+    async def _do_network(self, gid: str) -> Tuple[Optional[str], Optional[str]]:
+        """群联动分析，返回 (图片路径, 错误信息)。"""
         group_map = self.group_bindings.get(gid, {})
         if len(group_map) < 2:
-            yield event.plain_result("群内至少需要 2 人绑定才能分析联动。")
-            return
+            return None, "群内至少需要 2 人绑定才能分析联动。"
 
-        yield event.plain_result("正在分析群内 PSN 联动，可能需要一些时间...")
         client = await self._get_client()
-
-        # 取每个人的游戏库 title_id 集合
         sem = asyncio.Semaphore(4)
 
         async def _titles(oid):
@@ -1073,6 +1283,26 @@ class PlayStationGamesPlugin(Star):
             "shared_count": len(shared),
         }
         img_url = await self._render("network.html", render, width=820)
+        return img_url, None
+
+    @filter.command("psn联动", prefix_optional=True)
+    async def cmd_network(self, event: AstrMessageEvent):
+        """群内 PSN 联动：好友关系与共同游戏。"""
+        self._log_usage(event, "psn联动")
+        ok, msg = self._gate(event)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        gid = str(event.get_group_id() or "")
+        if not gid:
+            yield event.plain_result("请在群聊中使用该指令。")
+            return
+
+        yield event.plain_result("正在分析群内 PSN 联动，可能需要一些时间...")
+        img_url, err = await self._do_network(gid)
+        if err:
+            yield event.plain_result(err)
+            return
         yield event.image_result(img_url)
 
     # -------------------- 群内在线 --------------------
@@ -1147,6 +1377,384 @@ class PlayStationGamesPlugin(Star):
             yield event.plain_result(err)
             return
         yield event.image_result(img_url)
+
+    # -------------------- 自然语言意图分发（LLM 之前拦截，绕过其他插件） --------------------
+    #
+    # 说明：@filter.llm_tool 依赖 Agent 阶段。若用户同时安装了 memory_companion /
+    # private_companion 等会接管 Agent 的插件，它们可能在 LLM 选择工具前就拦截请求
+    # （例如用记忆里的历史失败话术直接回复，或用私有 Agent 屏蔽本插件工具）。
+    #
+    # 这里在「插件处理阶段」（star_request，早于 Agent/LLM 阶段）用 @filter.regex
+    # 做确定性的中文意图识别：命中 PSN 意图就直接处理并 stop_event()，事件不会再流入
+    # 任何 LLM/Agent 插件，从而彻底绕过干扰。llm_tool 仍保留，作为意图模糊时的兜底。
+
+    # 已知指令名（用于判断消息是不是显式指令，避免与 command 重复处理）
+    _KNOWN_COMMANDS = (
+        "psn帮助", "绑定psn", "解绑psn", "psn同步", "psn刷新",
+        "psn游戏库", "psn游戏", "psn奖杯", "psn排行", "psn对比",
+        "psn联动", "psn在线", "psn启用", "psn禁用", "psn",
+    )
+
+    # 意图识别规则：(动作, 必须包含的任一关键词)。按特异性从高到低排序。
+    _INTENT_RULES = (
+        # 帮助 / 绑定管理（最具体，先判）
+        ("help",      ("psn帮助", "psn指令", "psn命令", "psn怎么用", "psn功能",
+                       "playstation帮助")),
+        ("sync",      ("同步绑定", "同步到本群", "同步到群", "psn同步")),
+        ("unbind",    ("解绑", "解除绑定", "取消绑定", "不绑定了")),
+        ("bind",      ("绑定psn", "绑定 psn", "绑定playstation", "绑定play station",
+                       "我的psn id", "psn id是", "psnid", "帮我绑定", "绑定psn账号")),
+        # 群功能
+        ("network",   ("联动", "共同游戏", "共同好友", "好友关系", "一起玩的游戏")),
+        ("online",    ("谁在线", "谁在玩", "在线状态", "现在有人", "都在线",
+                       "群里在线", "谁在线上", "正在玩什么", "在玩啥",
+                       "在玩什么游戏", "群里谁在", "有人在线")),
+        ("ranking",   ("排行", "排名", "排行榜", "最肝", "谁玩得最多", "谁游戏最多",
+                       "谁的游戏多", "谁奖杯多", "谁白金多", "谁的奖杯多",
+                       "谁的白金", "榜单", "rank", "游戏时长排行", "游戏数量排行",
+                       "游戏数排行", "奖杯排行", "白金排行", "谁最能玩", "玩得最多")),
+        ("compare",   ("对比", "比较", "比分", "和我谁", "跟我谁", "谁更肝", "谁厉害",
+                       "battle", "vs", "比一比", "谁更强", "和谁比")),
+        # 指定某款游戏（在「游戏库/奖杯」之前，且关键词要足够具体）
+        ("game",      ("游戏信息", "游戏详情", "游戏资料", "这个游戏", "该游戏",
+                       "这款游戏", "那款游戏", "游戏怎么样", "玩了多久",
+                       "玩了多长", "玩了多少小时", "游戏进度", "玩了多久",
+                       "游戏时长多少", "这个游戏玩了", "那款游戏玩了")),
+        # 个人数据
+        ("trophies",  ("奖杯进度", "奖杯情况", "奖杯列表", "我的奖杯", "我的白金",
+                       "白金杯", "成就", "trophy", "trophies", "奖杯")),
+        ("library",   ("游戏库", "游戏列表", "玩过哪些游戏", "玩过什么游戏", "有哪些游戏",
+                       "游戏数量", "多少款游戏", "几个游戏", "游戏时长统计",
+                       "总游戏时长", "总时长", "library", "玩过的游戏")),
+        ("profile",   ("资料", "主页", "个人主页", "psn资料", "在线吗", "在不在线",
+                       "在玩什么", "个人资料", "psn主页", "我的psn", "我的资料",
+                       "状态怎么样")),
+    )
+
+    _DIMENSION_KEYWORDS = (
+        (("白金",), "白金"),
+        (("游戏数", "游戏数量", "多少款", "游戏最多", "数量"), "游戏数"),
+        (("奖杯", "成就", "白金杯"), "奖杯"),
+        (("时长", "时间", "肝", "小时", "玩得最多"), "时长"),
+    )
+
+    def _is_explicit_command(self, text: str) -> bool:
+        """判断消息是否是显式指令（以指令前缀或指令名开头），交给 command 处理。"""
+        t = (text or "").strip()
+        if not t:
+            return True
+        # 去除常见唤醒前缀
+        stripped = t
+        for pref in ("/", "!", "／", "。", "，", ",", "#"):
+            if stripped.startswith(pref):
+                stripped = stripped[len(pref):].strip()
+                break
+        low = stripped.lower()
+        for cmd in self._KNOWN_COMMANDS:
+            if low.startswith(cmd.lower()):
+                return True
+        return False
+
+    @staticmethod
+    def _detect_dimension(text: str) -> str:
+        for kws, dim in PlayStationGamesPlugin._DIMENSION_KEYWORDS:
+            if any(k in text for k in kws):
+                return dim
+        return "时长"
+
+    def _detect_intent(self, text: str) -> Optional[str]:
+        """识别 PSN 意图，返回动作名；非 PSN 请求返回 None。"""
+        t = (text or "").strip()
+        if not t:
+            return None
+        low = t.lower()
+        # 强相关词：PSN/PlayStation/奖杯/游戏库/排行/绑定 等
+        psn_hint = any(k in t for k in (
+            "psn", "playstation", "奖杯", "白金", "游戏库", "排行", "排名",
+            "绑定", "解绑", "联动", "游戏信息", "游戏详情", "游戏资料",
+            "游戏时长", "游戏进度", "玩了多久", "玩了多长", "玩了多少",
+            "游戏数量", "多少款游戏",
+        )) or "ps" in low
+        # 群功能词：在群聊中被 @ 时，这些也应识别为 PSN 请求
+        group_hint = any(k in t for k in (
+            "最肝", "谁在线", "谁在玩", "在线吗", "在线状态", "在玩啥",
+            "在玩什么", "对比", "比较", "比一比", "谁厉害", "游戏最多",
+            "玩得最多", "谁的游戏", "谁奖杯", "谁白金",
+        ))
+        game_hint = ("游戏" in t) or ("玩" in t and ("ps" in low or "游戏" in t))
+        if not (psn_hint or group_hint or game_hint):
+            return None
+
+        for action, kws in self._INTENT_RULES:
+            for kw in kws:
+                hit = (kw.lower() in low) if kw.isascii() else (kw in t)
+                if hit:
+                    return action
+        # 仅有泛泛的 "我的 psn" 但无明确动作 -> 视为个人资料
+        if ("psn" in low or "playstation" in low) and any(
+            w in t for w in ("我的", "我", "资料", "看看", "查", "多少")
+        ):
+            return "profile"
+        return None
+
+    @staticmethod
+    def _extract_game_keyword(text: str) -> str:
+        """从自然语言中提取游戏名关键词。"""
+        t = text
+        # 去掉引号内的强调直接取引号内容
+        m = re.search(r"[「\"'“‘]([^」\"'”’]{1,40})[」\"'”’]", t)
+        if m:
+            return m.group(1).strip()
+        # 去掉意图/动作相关措辞，保留游戏名
+        patterns = [
+            r"(?:查一下|查下|查询|查|看看|看下|看一下|帮我看|帮我查|告诉我|想知道|请问|一下|"
+            r"这个游戏|该游戏|这款游戏|那款游戏|这个|那款|的|游戏信息|游戏详情|游戏资料|"
+            r"游戏时长|游戏时间|玩了多久|玩了多长时间|玩了多长|玩了多少小时|玩了多少个小时|"
+            r"游戏进度|游戏怎么样|怎么样|如何|是什么|叫什么|"
+            r"在|呢|吗|啊|呀|吧|哦|呗|嘛|么|时间|多长|多久|多少小时)",
+        ]
+        for pat in patterns:
+            t = re.sub(pat, " ", t)
+        t = re.sub(r"\s+", " ", t).strip()
+        return t.strip(" 的了吗呢啊呀吧哦呗嘛")
+
+    async def _dispatch_nl(self, event: AstrMessageEvent, text: str):
+        """自然语言意图处理（在插件阶段运行）。"""
+        self._log_usage(event, "nl_dispatch", text[:40])
+        ok, gmsg = self._gate(event)
+        if not ok:
+            yield event.plain_result(gmsg)
+            event.stop_event()
+            return
+
+        action = self._detect_intent(text)
+        if action is None:
+            # 非本插件意图：不做任何事，也不停止事件，交还给后续 LLM/插件
+            return
+
+        # 群功能需要群聊
+        need_group = action in ("ranking", "online", "network")
+        gid = str(event.get_group_id() or "")
+        if need_group and not gid:
+            event.stop_event()
+            yield event.plain_result("该功能需要在群聊中使用哦。")
+            return
+
+        try:
+            if action == "help":
+                event.stop_event()
+                yield event.plain_result(
+                    "直接 @我 用自然语言即可，例如：\n"
+                    "「查我的 PSN 资料」「看看我的游戏库」「我的奖杯」\n"
+                    "「群里谁最肝」「群里谁在线」「和 @某人 对比」\n"
+                    "「查 艾尔登法环 游戏信息」「绑定psn，ID是 xxx」"
+                ).use_t2i(False)
+                return
+
+            if action == "bind":
+                # 提取 ID：优先引号，否则取 psn id 后的内容
+                m = re.search(r"(?:id\s*[是为:：]?\s*)([A-Za-z0-9_\-]{2,30})", text, re.I)
+                online_id = m.group(1) if m else ""
+                if not online_id:
+                    event.stop_event()
+                    yield event.plain_result(
+                        "请告诉我你的 PSN 在线 ID，例如「绑定psn，ID是 XiaoMing」。"
+                    ).use_t2i(False)
+                    return
+                event.stop_event()
+                async for r in self._nl_bind(event, online_id):
+                    yield r
+                return
+
+            if action == "unbind":
+                user_id = str(event.get_sender_id())
+                if user_id in self.bindings:
+                    del self.bindings[user_id]
+                    for gmap in self.group_bindings.values():
+                        gmap.pop(user_id, None)
+                    self._save_bindings()
+                event.stop_event()
+                yield event.plain_result("已解除你的 PSN 绑定。")
+                return
+
+            if action == "sync":
+                user_id = str(event.get_sender_id())
+                if user_id not in self.bindings:
+                    event.stop_event()
+                    yield event.plain_result("你还没有绑定 PSN ID，请先说「绑定psn，ID是 xxx」。")
+                    return
+                if self._link_user_to_group(user_id, gid):
+                    self._save_bindings()
+                event.stop_event()
+                yield event.plain_result(f"已将你（{self.bindings[user_id]}）同步到本群排行。")
+                return
+
+            if action == "ranking":
+                if self._link_user_to_group(str(event.get_sender_id()), gid):
+                    self._save_bindings()
+                dim = self._detect_dimension(text)
+                sort_by = self.DIM_MAP.get(dim, "time")
+                event.stop_event()
+                yield event.plain_result("正在统计群排行，请稍候...")
+                img_url, err, _t, _c = await self._do_ranking(gid, sort_by)
+                if err:
+                    yield event.plain_result(err)
+                else:
+                    yield event.image_result(img_url)
+                return
+
+            if action == "online":
+                event.stop_event()
+                yield event.plain_result("正在查看群友在线状态...")
+                img_url, err = await self._do_online(gid)
+                if err:
+                    yield event.plain_result(err)
+                else:
+                    yield event.image_result(img_url)
+                return
+
+            if action == "network":
+                group_map = self.group_bindings.get(gid, {})
+                if len(group_map) < 2:
+                    event.stop_event()
+                    yield event.plain_result("群内至少需要 2 人绑定才能分析联动。")
+                    return
+                event.stop_event()
+                yield event.plain_result("正在分析群内 PSN 联动，可能需要一些时间...")
+                img_url, err = await self._do_network(gid)
+                if err:
+                    yield event.plain_result(err)
+                else:
+                    yield event.image_result(img_url)
+                return
+
+            if action == "compare":
+                my_id = self.bindings.get(str(event.get_sender_id()))
+                if not my_id:
+                    event.stop_event()
+                    yield event.plain_result("你还没有绑定 PSN ID，请先说「绑定psn，ID是 xxx」。")
+                    return
+                target_id, rerr = self._resolve_target(event, "", fallback=False)
+                if not target_id:
+                    event.stop_event()
+                    yield event.plain_result(
+                        rerr or "请 @ 你想对比的群友（对方需已绑定 PSN）。"
+                    )
+                    return
+                if target_id.lower() == my_id.lower():
+                    event.stop_event()
+                    yield event.plain_result("不能和自己对比哦。")
+                    return
+                event.stop_event()
+                yield event.plain_result(f"正在对比 {my_id} 与 {target_id}...")
+                img_url, err = await self._do_compare(my_id, target_id)
+                if err:
+                    yield event.plain_result(err)
+                else:
+                    yield event.image_result(img_url)
+                return
+
+            if action == "game":
+                online_id, rerr = self._tool_resolve_target(event, "")
+                if not online_id:
+                    event.stop_event()
+                    yield event.plain_result(rerr)
+                    return
+                keyword = self._extract_game_keyword(text)
+                if not keyword:
+                    event.stop_event()
+                    yield event.plain_result("请告诉我想查询的游戏名称，例如「查 艾尔登法环 的游戏信息」。")
+                    return
+                event.stop_event()
+                yield event.plain_result(f"正在查找 {online_id} 的游戏「{keyword}」...")
+                img_url, err = await self._do_game(online_id, keyword)
+                if err:
+                    yield event.plain_result(err)
+                else:
+                    yield event.image_result(img_url)
+                return
+
+            # 资料 / 游戏库 / 奖杯：目标优先取 @，其次自己
+            online_id, rerr = self._tool_resolve_target(event, "")
+            if not online_id:
+                event.stop_event()
+                yield event.plain_result(rerr)
+                return
+
+            if action == "library":
+                event.stop_event()
+                yield event.plain_result(f"正在统计 {online_id} 的游戏库，请稍候...")
+                img_url, err = await self._do_library(online_id)
+            elif action == "trophies":
+                event.stop_event()
+                yield event.plain_result(f"正在获取 {online_id} 的奖杯数据...")
+                img_url, err = await self._do_trophies(online_id)
+            else:  # profile
+                event.stop_event()
+                yield event.plain_result(f"正在查询 {online_id} 的资料...")
+                img_url, err = await self._do_profile(online_id)
+            if err:
+                yield event.plain_result(err)
+            else:
+                yield event.image_result(img_url)
+            return
+
+        except Exception as e:
+            logger.error(f"[PSN] 自然语言分发异常：{e}\n{traceback.format_exc()}")
+            event.stop_event()
+            yield event.plain_result(self._friendly_tool_error("处理 PSN 请求", e))
+
+    async def _nl_bind(self, event: AstrMessageEvent, online_id: str):
+        """自然语言绑定（复用校验逻辑）。"""
+        online_id = self._strip_at_text(online_id.strip())
+        client = await self._get_client()
+        try:
+            try:
+                profile = await client.get_full_profile(online_id)
+            except PSNNotFound:
+                yield event.plain_result(
+                    f"未找到 PSN 用户「{online_id}」，请检查在线 ID 是否正确（注意大小写）。"
+                )
+                return
+            except PSNAuthError as e:
+                yield event.plain_result(f"认证失败：{e}\n请让管理员更新 NPSSO 令牌。")
+                return
+            except (PSNForbidden, PSNClientError) as e:
+                logger.warning(f"[PSN] 自然语言绑定时部分数据获取失败，允许绑定：{e}")
+                profile = {"profile": {"online_id": online_id}}
+            user_id = str(event.get_sender_id())
+            self.bindings[user_id] = online_id
+            self._link_user_to_group(user_id, event.get_group_id())
+            self._save_bindings()
+            name = (profile.get("profile", {}) or {}).get("online_id", online_id)
+            yield event.plain_result(
+                f"✅ 绑定成功！已关联 PSN 账号：{name}。现在可以直接问我 PSN 相关问题啦。"
+            ).use_t2i(False)
+        except Exception as e:
+            yield event.plain_result(self._friendly_tool_error("绑定 PSN 账号", e))
+
+    # 用一个足够宽的正则挂载分发器：覆盖 PSN / PlayStation / 奖杯 / 游戏库 / 绑定 等。
+    # 是否真正命中由 _detect_intent 二次判定；不命中则不停止事件，正常交还给 LLM。
+    @filter.regex(
+        r"(?i)(psn|play\s*station|奖杯|白金杯?|游戏库|游戏信息|游戏详情|游戏资料|游戏时长|"
+        r"游戏进度|玩了多久|玩了多长|游戏数量|多少款游戏|排行|排名|排行榜|"
+        r"绑定|解绑|同步|联动|谁在线|谁在玩|在玩啥|在玩什么|在线吗|在线状态|"
+        r"对比|比较|比一比|最肝|肝|游戏|玩)"
+    )
+    async def on_natural_language(self, event: AstrMessageEvent):
+        """自然语言入口：在 LLM/Agent 阶段之前确定性地处理 PSN 请求。"""
+        # 显式指令交给 command handler，避免重复处理
+        text = event.get_message_str().strip()
+        if self._is_explicit_command(text):
+            return
+        # 仅在被唤醒（@机器人 / 私聊 / 唤醒前缀）时响应，避免群里闲聊误触发
+        try:
+            if not event.is_at_or_wake_command:
+                return
+        except Exception:
+            pass
+        async for r in self._dispatch_nl(event, text):
+            yield r
 
     # -------------------- LLM 自然语言工具 --------------------
     #
@@ -1338,6 +1946,44 @@ class PlayStationGamesPlugin(Star):
                 return
         except Exception as e:
             async for r in self._tool_error(event, "查询奖杯", e):
+                yield r
+            return
+        async for r in self._yield_tool_result(event, event.image_result(img_url)):
+            yield r
+
+    @filter.llm_tool(name="psn_query_game")
+    async def tool_query_game(self, event: AstrMessageEvent, game_name: str = "", target: str = ""):
+        '''查询某一款具体 PlayStation(PSN) 游戏的详细信息：该玩家在这款游戏上的总游玩时长/小时、启动次数、首次与最近游玩日期、奖杯完成度与白金/金/银/铜进度。当用户指定了某个游戏名并询问"这个游戏玩了多久/游戏信息/游戏详情/奖杯进度"时调用。
+
+        Args:
+            game_name(string): 要查询的游戏名称关键词（必填），例如"艾尔登法环""黑神话悟空""战神"。
+            target(string): 可选，查谁的这款游戏。查用户自己时留空或填"我"；否则填被 @ 者、对方 QQ 号或 PSN 在线 ID。
+        '''
+        err = self._tool_gate(event)
+        if err:
+            async for r in self._yield_tool_result(event, event.plain_result(err)):
+                yield r
+            return
+        try:
+            online_id, rerr = self._tool_resolve_target(event, target or "")
+            if not online_id:
+                async for r in self._yield_tool_result(event, event.plain_result(rerr)):
+                    yield r
+                return
+            keyword = (game_name or "").strip()
+            if not keyword:
+                async for r in self._yield_tool_result(
+                    event, event.plain_result("请告诉我想查询的游戏名称，例如「艾尔登法环玩了多久」。")
+                ):
+                    yield r
+                return
+            img_url, serr = await self._do_game(online_id, keyword)
+            if serr:
+                async for r in self._yield_tool_result(event, event.plain_result(serr)):
+                    yield r
+                return
+        except Exception as e:
+            async for r in self._tool_error(event, "查询游戏信息", e):
                 yield r
             return
         async for r in self._yield_tool_result(event, event.image_result(img_url)):
