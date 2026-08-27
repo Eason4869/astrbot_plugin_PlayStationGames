@@ -39,9 +39,13 @@ tags:
   - 可视化
   - 娱乐
 
-# 声明支持的消息平台适配器 ID（对应 AstrBot 平台适配器）
+# 声明支持的消息平台适配器 ID（对应 AstrBot 平台适配器）。
+# 说明：本插件仅使用平台无关的通用 API（指令 / 文字 / 图片 / 群号 / @ 组件），
+# 理论上兼容所有支持群聊、图片与 @ 的平台；目前在 aiocqhttp（NapCat 等 QQ 实现）上实测验证，
+# 其余平台按通用接口推断兼容，未逐一实测。微信公众号 / 企业微信智能机器人等
+# 无群聊或被动回复受限的平台不适用群排行/@对比功能，故不列入。
 support_platforms:
-  - aiocqhttp            # OneBot 实现（NapCat / Lagrange / go-cqhttp 等 QQ）
+  - aiocqhttp            # OneBot 实现（NapCat / Lagrange / go-cqhttp 等 QQ），已实测
   - qq_official          # QQ 机器人官方 API
   - qq_official_webhook  # QQ 机器人官方 API（Webhook）
   - telegram             # Telegram
@@ -49,10 +53,8 @@ support_platforms:
   - satori               # Satori 协议（Koishi 生态等）
   - lark                 # 飞书 / Lark
   - wecom                # 企业微信
-  - wecom_ai_bot         # 企业微信智能机器人
   - dingtalk             # 钉钉
   - kook                 # KOOK / 开黑啦
   - slack                # Slack
-  - weixin_official_account  # 微信公众号
   - misskey              # Misskey
   - mattermost           # Mattermost

@@ -31,6 +31,18 @@
 
 ---
 
+## 🧩 支持平台
+
+插件仅使用 AstrBot 的平台无关通用接口（指令 / 文字 / 图片 / 群号 / @ 消息段），因此理论上兼容所有**支持群聊、图片与 @ 功能**的消息平台。
+
+- **已实测**：`aiocqhttp`（NapCat / Lagrange / go-cqhttp 等 OneBot 实现，即 QQ）。
+- **通用接口推断兼容（未逐一实测）**：QQ 官方（`qq_official` / `qq_official_webhook`）、Telegram、Discord、Satori、飞书、企业微信、钉钉、KOOK、Slack、Misskey、Mattermost。
+- **不适用**：微信公众号（无群聊、被动回复受限）、企业微信智能机器人等无群成员/排行模型的渠道，故未声明支持。
+
+在未实测平台如遇到图片或 @ 解析差异，欢迎提 issue 反馈。
+
+---
+
 ## 📦 安装
 
 ### 方式一：插件市场（推荐）
