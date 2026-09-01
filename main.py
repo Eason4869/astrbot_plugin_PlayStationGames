@@ -325,7 +325,7 @@ def _content_tokens(s: str) -> set:
     "astrbot_plugin_PlayStationGames",
     "Eason4869",
     "PlayStation玩家数据 — 绑定PSN账号，查询游戏库/游戏时间/奖杯、群内排行与对比（图片可视化）",
-    "1.3.0",
+    "1.3.1",
     "https://github.com/Eason4869/astrbot_plugin_PlayStationGames",
 )
 class PlayStationGamesPlugin(Star):
@@ -551,6 +551,24 @@ class PlayStationGamesPlugin(Star):
         # 去掉残留的纯 @ 前缀（无括号）
         text = re.sub(r"^@\S+", "", text).strip()
         return text
+
+    @staticmethod
+    def _remove_at_fragments(text: str) -> str:
+        """从文本中**彻底移除** @ 提及片段（而非像 _strip_at_text 那样转成 QQ 号）。
+
+        覆盖 ``@昵称(qq号)``（aiocqhttp）、``[At:qq号]``（AstrBot 组件占位）与
+        纯 ``@昵称`` 三种形态，避免被 @ 的人名/QQ 号混进游戏名等参数参与模糊搜索。
+        """
+        if not text:
+            return ""
+        t = text
+        # @昵称(qq号) —— aiocqhttp 等适配器渲染的 @ 组件
+        t = re.sub(r"@[^\s()@]+\(\d+\)", " ", t)
+        # [At:qq号] —— AstrBot 组件占位
+        t = re.sub(r"\[At:\d+\]", " ", t)
+        # 纯 @昵称（要求后接空白或结尾，避免把紧贴其后的游戏名一并吞掉）
+        t = re.sub(r"@[^\s()@]{1,20}(?=\s|$)", " ", t)
+        return re.sub(r"\s+", " ", t).strip()
 
     def _resolve_target(
         self,
@@ -1235,7 +1253,7 @@ class PlayStationGamesPlugin(Star):
         """解析「目标 + 游戏名」参数，返回 (online_id, keyword, error)。"""
         # 1) 优先处理消息链里的 @ 提及
         at_targets = self._extract_at_targets(event)
-        cleaned = self._strip_at_text(text or "").strip()
+        cleaned = self._remove_at_fragments(text or "")
         if at_targets:
             target_id = None
             for qid in at_targets:
@@ -1853,7 +1871,9 @@ class PlayStationGamesPlugin(Star):
     @staticmethod
     def _extract_game_keyword(text: str) -> str:
         """从自然语言中提取游戏名关键词。"""
-        t = text
+        # 先彻底移除 @ 提及片段（如「@小明(123456) 艾尔登法环玩了多久」），
+        # 否则被 @ 的人名/QQ 号会混进关键词，被当成游戏名去模糊搜索
+        t = PlayStationGamesPlugin._remove_at_fragments(text)
         # 去掉引号内的强调直接取引号内容
         m = re.search(r"[「\"'“‘]([^」\"'”’]{1,40})[」\"'”’]", t)
         if m:
@@ -2252,15 +2272,28 @@ class PlayStationGamesPlugin(Star):
         return False
 
     async def _tool_resolve_target(self, event: AstrMessageEvent, target: str):
-        """LLM 工具专用的目标解析：target 指自己时回退到本人绑定。
+        """LLM 工具 / 自然语言分发共用的目标解析。
+
+        优先级：消息链中的真实 @ 提及 > target 指自己（回退本人绑定）> 文本参数。
 
         返回 (online_id, error)。
         """
+        # 1) 消息链里的 @ 提及最可靠：即使用户只 @ 了别人、target 为空
+        #    （如「@bot @小明 艾尔登法环玩了多久」），也应查被 @ 的人，而不是查自己。
+        at_targets = self._extract_at_targets(event)
+        if at_targets:
+            for qid in at_targets:
+                online_id = self.bindings.get(qid)
+                if online_id:
+                    return online_id, None
+            return None, "被 @ 的用户还没有绑定 PSN 账号，请提醒 TA 先使用 /绑定psn <PSN在线ID>。"
+        # 2) target 指自己（「我」「自己」/ 本人昵称 / 本人 QQ 号 / 空）时回退到本人绑定
         if self._refers_to_self(event, target or ""):
             online_id = self.bindings.get(str(event.get_sender_id()))
             if online_id:
                 return online_id, None
             return None, "未找到绑定的 PSN ID。请先使用 /绑定psn <PSN在线ID> 绑定，或直接说「绑定psn，ID是你的PSN在线ID」。"
+        # 3) 其余交给通用解析（文本可能是 QQ 号 / PSN 在线 ID / 残留 @ 文本）
         return self._resolve_target(event, target or "", fallback=True)
 
     @filter.llm_tool(name="psn_query_profile")
