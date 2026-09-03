@@ -3,6 +3,8 @@
 > AstrBot 的 PlayStation Network (PSN) 玩家数据可视化插件。
 > 支持按群启用、绑定 PSN 账号、查询游戏库 / 游戏时间 / 奖杯、群内排行与对比，所有结果均以**图片**形式返回。
 
+> **简体中文** · [English README](./README_EN.md)
+
 灵感参考：[astrbot_plugin_steam_status_monitor](https://github.com/Maoer233/astrbot_plugin_steam_status_monitor)、[astrbot_plugin_steamgame](https://github.com/bvzrays/astrbot_plugin_steamgame)。
 
 ---
@@ -237,7 +239,8 @@ astrbot_plugin_PlayStationGames/
 │   ├── compare.html
 │   ├── network.html
 │   └── online.html
-└── README.md
+├── README.md          # 中文说明
+├── README_EN.md       # English README
 ```
 
 PSNAWP 是同步库，内部使用 `requests`。`psn_client.py` 通过 `asyncio` 线程池执行阻塞调用，并加锁串行化以遵守 PSN 的速率限制。
