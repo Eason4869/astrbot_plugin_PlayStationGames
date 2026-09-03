@@ -165,6 +165,17 @@ GAME_ALIAS_KEYWORDS = {
     "双人成行": ["it takes two", "双人成行"],
     "霍格沃茨之遗": ["hogwarts legacy", "霍格沃茨之遗"],
     "霍格沃茨": ["hogwarts legacy", "霍格沃茨"], "霍格沃兹": ["hogwarts legacy", "霍格沃茨"],
+    # 彩虹六号 / Siege（用户提及 r6 / r6s / 围攻）
+    "彩虹六号": ["rainbow six siege", "彩虹六号 围攻", "彩虹六号：围攻", "r6", "siege"],
+    "彩虹六号围攻": ["rainbow six siege", "彩虹六号 围攻", "彩虹六号：围攻", "siege"],
+    "彩虹六号：围攻": ["rainbow six siege", "彩虹六号 围攻", "siege"],
+    "围攻": ["rainbow six siege", "siege"],
+    "r6s": ["rainbow six siege", "siege"],
+    # 更多常见补充
+    "博德之门3": ["baldur's gate 3", "博德之门 3", "柏德之门3"], "博德3": ["baldur's gate 3", "博德之门 3"],
+    "博德之门": ["baldur's gate", "博德之门"],
+    "大镖客3": ["red dead redemption 3", "荒野大镖客3"],
+    "侠盗猎车手5": ["grand theft auto v", "gta v"],
 }
 
 
@@ -325,7 +336,7 @@ def _content_tokens(s: str) -> set:
     "astrbot_plugin_PlayStationGames",
     "Eason4869",
     "PlayStation玩家数据 — 绑定PSN账号，查询游戏库/游戏时间/奖杯、群内排行与对比（图片可视化）",
-    "1.3.1",
+    "1.4.0",
     "https://github.com/Eason4869/astrbot_plugin_PlayStationGames",
 )
 class PlayStationGamesPlugin(Star):
@@ -338,6 +349,9 @@ class PlayStationGamesPlugin(Star):
         self.image_quality: int = max(10, min(100, int(self.config.get("image_quality", 90) or 90)))
         self.cache_ttl: int = int(self.config.get("cache_ttl", 300) or 300)
         self.max_titles: int = int(self.config.get("max_titles", 200) or 200)
+        # 是否允许在确定性识别识别不出目标/游戏名时，调用当前 LLM 提供商做一次语义纠偏。
+        # 关闭后仅用确定性规则（代价：部分表述更模糊的问题无法识别）。
+        self.nl_llm_assist: bool = bool(self.config.get("nl_llm_assist", True))
 
         plugin_name = PLUGIN_DIR.name
         self.data_dir: Path = StarTools.get_data_dir(plugin_name)
@@ -609,6 +623,128 @@ class PlayStationGamesPlugin(Star):
                 return online_id, None
             return None, "未找到绑定的 PSN ID。请先使用 /绑定psn <PSN在线ID> 绑定账号。"
         return None, None
+
+    # ---------------- 自然语言的目标识别（含未 @ 点名） ----------------
+
+    # 只有出现在「X 的 …」后、属于“查某人的个人数据”的词，才会把 X 当作人对待，
+    # 避免把聊天里的普通词误当群友。
+    _PERSON_TAIL_WORDS = (
+        "奖杯", "白金", "奖杯进度", "奖杯情况", "资料", "主页", "档案", "数据",
+        "游戏库", "游戏列表", "玩过的游戏", "玩过什么", "在玩", "在线", "正在玩",
+        "游戏时长", "时长统计", "时长", "时间统计", "游戏进度", "进度", "状态",
+        "排行", "排名", "肝度", "肝", "游戏数量", "多少款", "游戏时间", "情况",
+    )
+
+    async def _group_roster(self, event) -> List[Tuple[str, str]]:
+        """拉取当前群成员名册 [(qq_id, 昵称)]（尽力而为，跨平台可能拿不到返回空）。"""
+        try:
+            gid = event.get_group_id()
+            if not gid:
+                return []
+            grp = await event.get_group(gid)
+            members = getattr(grp, "members", None) or []
+            return [
+                (str(m.user_id), (m.nickname or "").strip())
+                for m in members
+                if (m.nickname or "").strip() and str(getattr(m, "user_id", "") or "").strip()
+            ]
+        except Exception as e:
+            logger.debug(f"[PSN] 获取群成员名册失败：{e}")
+            return []
+
+    async def _named_target_id(self, event, text: str) -> Optional[str]:
+        """从文本中识别“未 @ 但明确点名”的某位已绑定群友，返回其 qq_id；无法确定返回 None。
+
+        规则：仅当存在「X 的 <个人数据词>」这类所有格结构，且 X 是群名册里一个
+        非本人、已绑定的成员昵称时才命中，最大限度避免把聊天正文误当人名。
+        若点名的成员存在但未绑定，返回特殊哨兵 "UNBOUND" 由调用方提示。
+        """
+        t = (text or "").strip()
+        if not t:
+            return None
+        # 快速门：整句话若不含任何“查某人个人数据”的尾词（奖杯/资料/游戏库等），
+        # 则不是明确的点名查询，直接返回，避免为最常见(自query/闲聊)多拉一次群成员请求。
+        if not any(w in t for w in self._PERSON_TAIL_WORDS):
+            return None
+        sender_id = str(event.get_sender_id())
+        roster = await self._group_roster(event)
+        if not roster:
+            return None
+
+        def plausible(nm):
+            # 昵称需有一定长度且非纯数字/过长，才可能被当作人名提到
+            cc = len(re.findall(r"[\u4e00-\u9fff]", nm))
+            alnum = len(re.sub(r"[\u4e00-\u9fff\s]", "", nm))
+            if not nm or len(nm) > 20:
+                return False
+            return cc >= 2 or alnum >= 3
+
+        candidates = []
+        # 「X 的 <个人数据>」结构：把 X 当人称前缀并允许多余的空格/的，随后必须跟一个
+        # 表示“查某人个人数据”的动作词，避免把聊天里的普通所有格误当点名。
+        tail_alt = "|".join(re.escape(w) for w in self._PERSON_TAIL_WORDS)
+        for qid, nm in roster:
+            if qid == sender_id:
+                continue
+            if not plausible(nm):
+                continue
+            # 昵称需出现在一个明确的人称前缀结构里：X的+个人数据词
+            esc = re.escape(nm)
+            pat = (
+                r"(?:^|[查看问问你想帮我给]|[，,、;；]|\s)" + esc
+                + r"\s*的?\s*(?:" + tail_alt + r")"
+            )
+            if re.search(pat, t):
+                if self.bindings.get(qid):
+                    candidates.append((qid, nm))
+                else:
+                    # 清楚点到了但未绑定，记下供提示
+                    candidates.append(("UNBOUND", nm))
+        return candidates[0][0] if candidates else None
+
+    async def _strip_target_name(self, event, qq_id: str, text: str) -> str:
+        """把文本中指向某位群友的昵称片段剔除，剩下的尽量是“游戏/动作”部分。
+
+        例如「查 小明 的 老头环 玩了多久」且小明的昵称是「小明」时返回「的 老头环 玩了多久」，
+        供 _extract_game_keyword 继续处理。找不到该成员昵称时原样返回。
+        """
+        t = (text or "").strip()
+        for qid, nm in await self._group_roster(event):
+            if qid != qq_id:
+                continue
+            if not nm:
+                break
+            esc = re.escape(nm)
+            t = re.sub(esc, " ", t)
+            break
+        return re.sub(r"\s+", " ", t).strip()
+
+    async def _nl_resolve_target(self, event: AstrMessageEvent, text: str):
+        """自然语言「目标」解析（个人数据查询），优先级：实 @ > 文本点名(未@的群友) > 本人。
+
+        返回 (online_id, error)。
+        """
+        # 1) 消息链里真实的 @ 提及最可靠
+        at_targets = self._extract_at_targets(event)
+        if at_targets:
+            for qid in at_targets:
+                oid = self.bindings.get(qid)
+                if oid:
+                    return oid, None
+            return None, "被 @ 的用户还没有绑定 PSN 账号，请提醒 TA 先使用 /绑定psn <PSN在线ID>。"
+        # 2) 未 @ 但点名了某位群友（如「看看 小明的 奖杯」）
+        named = await self._named_target_id(event, text or "")
+        if named == "UNBOUND":
+            return None, "这位群友还没有绑定 PSN 账号。请 TA 先使用 /绑定psn <PSN在线ID>，或直接 @TA。"
+        if named:
+            return self.bindings[named], None
+        # 3) 回退本人
+        def _self():
+            oid = self.bindings.get(str(event.get_sender_id()))
+            if not oid:
+                return None, "未找到绑定的 PSN ID。请先使用 /绑定psn <PSN在线ID> 绑定，或 @ 想查询的群友。"
+            return oid, None
+        return _self()
 
     async def _render(self, template_name: str, data: Dict[str, Any], width: int = 820) -> str:
         path = TEMPLATES_DIR / template_name
@@ -1054,10 +1190,17 @@ class PlayStationGamesPlugin(Star):
             return 150 + len(k)
         return 0
 
-    async def _find_game(self, online_id: str, keyword: str):
+    async def _find_game(self, online_id: str, keyword: str, assist: bool = False):
         """在用户游戏库中按关键词查找游戏，合并奖杯信息。
 
-        返回 (title_dict, trophy_dict_or_None, all_titles)；未找到时 title_dict 为 None。
+        Args:
+            online_id: PSN 在线 ID。
+            keyword: 搜索关键词。
+            assist: 是否允许在确定性匹配失败时借助 LLM 从真实游戏库里重新判定目标
+                （仅自然语言路径使用，受 nl_llm_assist 配置控制；指令路径保持确定性）。
+
+        Returns:
+            (title_dict, trophy_dict_or_None, all_titles)；未找到时 title_dict 为 None。
         """
         client = await self._get_client()
         titles = await client.get_title_stats(online_id)
@@ -1082,6 +1225,14 @@ class PlayStationGamesPlugin(Star):
             if best_score > 0:
                 scored.append((best_score, t))
         if not scored:
+            # 确定性匹配失败：若允许 LLM 辅助（自然语言路径），让模型从真实游戏库里
+            # 判定用户最可能指的那款（如口语/俗称/别名的变体）。
+            if assist:
+                llm_pick = await self._pick_game_from_titles(online_id, keyword, titles)
+                if llm_pick:
+                    scored = [(1, llm_pick)]  # 直接采纳 LLM 判定
+
+        if not scored:
             # 兜底：按字符相似度给出最近似的 4 个游戏名作为建议
             kn = _norm_game(keyword)
             near = []
@@ -1100,7 +1251,10 @@ class PlayStationGamesPlugin(Star):
             near.sort(reverse=True)
             suggestions = [n for _ov, n in near[:4] if n]
             return None, None, suggestions
-        scored.sort(key=lambda x: (x[0], x[1].get("play_seconds", 0)), reverse=True)
+
+        # LLM 直接采纳的结果（分数 1）无需再按实际游玩排序；普通判定才按分数+时长排序。
+        if scored[0][0] != 1:
+            scored.sort(key=lambda x: (x[0], x[1].get("play_seconds", 0)), reverse=True)
         best = scored[0][1]
 
         # 精确名 -> 包含式回退匹配奖杯
@@ -1113,17 +1267,67 @@ class PlayStationGamesPlugin(Star):
                     break
         return best, trophy, []
 
+    async def _pick_game_from_titles(self, online_id: str, phrase: str, titles: list) -> Optional[dict]:
+        """确定性匹配失败时，让 LLM 从该用户真实游戏库中选出 phrase 最可能指的游戏。
+
+        Args:
+            online_id: PSN 在线 ID（用于日志）。
+            phrase: 用户原始描述/关键词。
+            titles: 已拉取的真实游戏列表（仅用于展示给模型选择，不重复请求）。
+
+        Returns:
+            选中的 title dict；无法判定或调用失败时返回 None。
+        """
+        # 受开关与提供商可用性约束；失败一律静默回退，绝不影响确定性路径。
+        if not self.nl_llm_assist or not titles:
+            return None
+        try:
+            provider = await self.context.get_using_provider_async()
+            if provider is None:
+                return None
+            cap = titles[:60]
+            numbered = "\n".join(f"{i}. {t.get('name')}" for i, t in enumerate(cap, 1))
+            if not numbered:
+                return None
+            prompt = (
+                "用户在问他自己 PSN 游戏库里的一款游戏，说的大致是：\n“{phrase}”\n\n"
+                "下面是他的真实游戏库（含游玩过的游戏）。请严格从编号里挑出最可能指的那款，"
+                "只输出数字编号；若都不像就输出 0。不要解释，不要加标点。\n\n{numbered}"
+            ).format(phrase=(phrase or "").strip()[:120], numbered=numbered)
+
+            async def _ask():
+                resp = await provider.text_chat(prompt=prompt, persist=False)
+                txt = (getattr(resp, "completion_text", "") or "").strip()
+                m = re.search(r"\d+", txt)
+                if not m:
+                    return None
+                idx = int(m.group(0)) - 1
+                return cap[idx] if 0 <= idx < len(cap) else None
+
+            return await asyncio.wait_for(_ask(), timeout=12)
+        except asyncio.TimeoutError:
+            logger.warning("[PSN] LLM 游戏再匹配超时，忽略。")
+        except Exception as e:
+            logger.debug(f"[PSN] LLM 游戏再匹配失败（忽略）：{e}")
+        return None
+
     async def _do_game(
-        self, online_id: str, keyword: str
+        self, online_id: str, keyword: str, assist: bool = False
     ) -> Tuple[Optional[str], Optional[str]]:
-        """查询指定游戏详情，返回 (图片路径, 错误信息)。"""
+        """查询指定游戏详情，返回 (图片路径, 错误信息)。
+
+        Args:
+            online_id: PSN 在线 ID。
+            keyword: 游戏名关键词。
+            assist: 是否允许 LLM 辅助再匹配（仅自然语言路径使用）。
+        """
         client = await self._get_client()
         keyword = (keyword or "").strip()
         if not keyword:
             return None, "请告诉我想查询的游戏名称，例如「查询 艾尔登法环 的游戏信息」。"
 
         try:
-            title, trophy, suggestions = await self._find_game(online_id, keyword)
+            title, trophy, suggestions = await self._find_game(online_id, keyword, assist=assist)
         except PSNAuthError as e:
             return None, f"PSN 认证失败：{e}\n请重新获取 NPSSO 令牌并更新配置。"
         except PSNNotFound as e:
@@ -1868,6 +2072,49 @@ class PlayStationGamesPlugin(Star):
             return "profile"
         return None
 
+    _GAME_LEAD_NOISE = (
+        # 唤醒 / 主语 / 人称 / 帮忙 / 查询请求 等前缀，位于句首时在游戏名之前，应剔除。
+        # 注意顺序：长的、具体的词在前，短的如「我」「查」在后，避免被短的提前吃错相邻字。
+        "你帮我看", "帮我查一下", "帮我看下", "帮我看看", "帮我查询", "帮我查",
+        "帮我查查", "给我看看", "给我查查", "我想查一下", "我想查询",
+        "我想看看", "想看下", "看看我", "看下我", "查一下", "查查", "查下",
+        "查询一下", "看看", "看一下", "想问下", "请问", "想查", "想看", "帮我",
+        "给我", "我想", "我看", "我的", "你的", "他的", "她的", "它的", "咱",
+        "我们", "你们", "他们", "她们", "大家", "某人", "这位", "那个", "这个",
+        "我", "你", "他", "她", "它", "谁", "查", "看", "问",
+    )
+
+    @staticmethod
+    def _strip_game_leading(text: str) -> str:
+        """去掉句首与游戏名无关的主语/人称/请求前缀，只保留真正的游戏名主体。
+
+        例如「我 大镖客2 玩了多久」→「大镖客2 玩了多久」；
+        「@小明 帮我查 美末2 时长」→「美末2 时长」。
+
+        安全边界：只剔除「以空白或标点与该词分隔」的前缀（即它是独立的对白词），
+        不剔除与后续汉字粘连的词——因为粘连时读音/写法可能就是游戏名本体
+        （如「我的世界」= Minecraft、「看门狗」= Watch Dogs 这类以人称/动词开头的官方名）。
+        粘连的人称/请求前缀由别名库与（可选）LLM 再匹配兜底。
+        """
+        t = (text or "").strip()
+        changed = True
+        while changed and t:
+            changed = False
+            for w in PlayStationGamesPlugin._GAME_LEAD_NOISE:
+                if t.startswith(w):
+                    # 必须词首 + 后接空白/标点（该词是独立介/请求词）才剔除，避免拆坏游戏名
+                    after = t[len(w):]
+                    if after and not after[0].isspace() and after[0] not in " ，、：:。.！!?？;；":
+                        continue
+                    rest = after.lstrip(" ，、：:。.！!?？;；")
+                    if not rest:
+                        # 整段都是前缀噪音，直接结束
+                        return ""
+                    t = rest
+                    changed = True
+                    break
+        return t
+
     @staticmethod
     def _extract_game_keyword(text: str) -> str:
         """从自然语言中提取游戏名关键词。"""
@@ -1878,6 +2125,8 @@ class PlayStationGamesPlugin(Star):
         m = re.search(r"[「\"'“‘]([^」\"'”’]{1,40})[」\"'”’]", t)
         if m:
             return m.group(1).strip()
+        # 剔除句首主语/人称/请求前缀（含「我大镖客2」里的「我」）
+        t = PlayStationGamesPlugin._strip_game_leading(t)
         # 去掉意图/动作相关措辞，保留游戏名
         patterns = [
             r"(?:查一下|查下|查询|查|看看|看下|看一下|帮我看|帮我查|告诉我|想知道|请问|一下|"
@@ -1888,6 +2137,10 @@ class PlayStationGamesPlugin(Star):
         ]
         for pat in patterns:
             t = re.sub(pat, " ", t)
+        # 句尾的补充主语从句（「我一共玩了」「我一共」「总共」「所有」等）也删掉
+        t = re.sub(
+            r"(?:我一共|我总共|我总共有|总共有|我玩了|我玩过|我通关|打通|白金了|奖杯拿|"
+            r"一共|总|所有|哪些)", "", t)
         t = re.sub(r"\s+", " ", t).strip()
         return t.strip(" 的了吗呢啊呀吧哦呗嘛")
 
@@ -2017,22 +2270,32 @@ class PlayStationGamesPlugin(Star):
                 return
 
             if action == "game":
-                online_id, rerr = await self._tool_resolve_target(event, "")
-                if not online_id:
-                    yield finish(event.plain_result(rerr))
+                # 支持「未 @ 但点名某人 的 某游戏」：把被点名的人识别为目标。
+                named = await self._named_target_id(event, text)
+                if named == "UNBOUND":
+                    yield finish(event.plain_result("这位群友还没有绑定 PSN 账号。请 TA 先 /绑定psn <PSN在线ID>，或直接 @TA。"))
                     return
-                keyword = self._extract_game_keyword(text)
+                if named:
+                    online_id = self.bindings[named]
+                    game_text = self._strip_target_name(event, named, text)
+                else:
+                    online_id, rerr = await self._tool_resolve_target(event, "")
+                    if not online_id:
+                        yield finish(event.plain_result(rerr))
+                        return
+                    game_text = text
+                keyword = self._extract_game_keyword(game_text)
                 if not keyword:
                     yield finish(event.plain_result("请告诉我想查询的游戏名称，例如「查 艾尔登法环 的游戏信息」。"))
                     return
                 wait_id = await self._send_progress(event, f"正在查找 {online_id} 的游戏「{keyword}」...")
-                img_url, err = await self._do_game(online_id, keyword)
+                img_url, err = await self._do_game(online_id, keyword, assist=self.nl_llm_assist)
                 await self._recall_message(event, wait_id)
                 yield finish(event.plain_result(err) if err else event.image_result(img_url))
                 return
 
-            # 资料 / 游戏库 / 奖杯：目标优先取 @，其次自己
-            online_id, rerr = await self._tool_resolve_target(event, "")
+            # 资料 / 游戏库 / 奖杯：目标优先取 @，其次「未 @ 但点名的群友」，再回退本人
+            online_id, rerr = await self._nl_resolve_target(event, text)
             if not online_id:
                 yield finish(event.plain_result(rerr))
                 return
