@@ -178,44 +178,88 @@ GAME_ALIAS_KEYWORDS = {
     "侠盗猎车手5": ["grand theft auto v", "gta v"],
 }
 
+# 可能出现于查询最前、与游戏名粘连或分隔的“主语/人称/请求”前缀。
+# 用作“去掉它再搜一次”的容错候选；原词仍会保留，因此不会误伤以这些字开头的真游戏名
+# （如「我的世界」= Minecraft、看门狗 = Watch Dogs）。
+_GAME_SUBJECT_LEADS = (
+    "帮我查一下", "帮我查查", "帮我查", "帮我看看", "帮我看下", "帮我看",
+    "我想查一下", "我想查到", "我想看看", "我想查", "我想看", "我查一下",
+    "我玩过", "我玩", "我看下", "我看", "我的", "我",
+    "你的", "你", "他的", "她的", "它的", "它的",
+    "某人", "请问", "问一下", "查一下", "查询", "查查", "查下",
+    "看一下", "看看", "看下", "你想查", "帮我看",
+    "咱", "我们", "让我",
+)
+
+
+def _subjectless_variants(raw: str) -> list:
+    """针对可能带句首主语/请求前缀的关键词，产出“去掉该前缀后”的候选变体。
+
+    例如 「我r6」→「r6」、「我大镖客2」→「大镖客2」。仅作为额外候选加入，
+    原关键词仍保留，从而让小众/新游戏的黏连说法也能被找到，同时不破坏「我的世界」这类
+    以人称开头的真名。只输出去掉前缀后仍有一定长度的候选，避免过度切分。
+    """
+    kw = (raw or "").strip()
+    if not kw:
+        return []
+    out = []
+    for lead in _GAME_SUBJECT_LEADS:
+        if kw.startswith(lead):
+            rest = kw[len(lead):].strip()
+            # 去掉前缀后仍需有内容（至少 2 个字符），彻底前缀词本身不产生候选
+            if len(rest) >= 2 and rest not in out:
+                out.append(rest)
+            break  # 只按首个命中前缀切一次，避免重复/多级切出怪词
+    return out
+
 
 def _expand_game_keywords(keyword: str) -> list:
-    """把用户输入扩展为多个候选搜索词：原始词 + 俗称映射到的中英文规范名。
+    """把用户输入（可能带句首人称/请求前缀）扩展出多个候选搜索词。
 
-    带版本号的输入（如「美末2」「战神5」「黑魂3」）只会命中版本一致的俗称，
-    不会因为「美末」是「美末2」的子串而误连到不带版本/前作的别名。
+    对「原始词」和「去掉句首主语/人称后的变体」分别做俗称映射，再取并集：
+      - 「r6」→ 命中别名 r6s → 追加 siege 等规范名；
+      - 「我r6」→ 先产出变体「r6」，再命中别名 → 同样能追加 siege 等规范名；
+      - 「我的世界」(Minecraft) 原词直接精确命中，追加的「世界」不会干扰结果。
+    带版本号的输入（如「美末2」「战神5」「黑魂3」）只会命中版本一致的俗称。
     """
     kw = (keyword or "").strip()
     if not kw:
         return []
     candidates = [kw]
-    norm_in = kw.lower().replace(" ", "")
-    in_versions = _version_tokens(kw)
 
     def add(v):
         if v and v not in candidates:
             candidates.append(v)
 
-    for alias, canon_list in GAME_ALIAS_KEYWORDS.items():
-        alias_norm = alias.replace(" ", "").lower()
-        if not alias_norm:
-            continue
-        # 整体互为子串才视为命中该俗称
-        if alias_norm not in norm_in and norm_in not in alias_norm:
-            continue
-        # 版本一致性：输入带版本号时，别名/候选必须包含相同版本号
-        if in_versions:
-            alias_ver = _version_tokens(alias)
-            if in_versions.isdisjoint(alias_ver):
+    # 对每个“种子”做别名扩展，合并候选。种子 = 原始词 + 去掉句首主语/请求前缀的变体。
+    def expand_seed(seed: str) -> None:
+        norm_in = seed.lower().replace(" ", "")
+        in_versions = _version_tokens(seed)
+        for alias, canon_list in GAME_ALIAS_KEYWORDS.items():
+            alias_norm = alias.replace(" ", "").lower()
+            if not alias_norm:
                 continue
-        for canon in canon_list:
+            # 整体互为子串才视为命中该俗称
+            if alias_norm not in norm_in and norm_in not in alias_norm:
+                continue
+            # 版本一致性：输入带版本号时，别名/候选必须包含相同版本号
             if in_versions:
-                cv = _version_tokens(canon)
-                # 仅当候选自身带了「不同的版本号」才跳过；无版本号的候选（如
-                # 用副标题区分的 god of war ragnarok）保留，交给匹配打分区分
-                if cv and in_versions.isdisjoint(cv):
+                alias_ver = _version_tokens(alias)
+                if in_versions.isdisjoint(alias_ver):
                     continue
-            add(canon)
+            for canon in canon_list:
+                if in_versions:
+                    cv = _version_tokens(canon)
+                    # 仅当候选自身带了「不同的版本号」才跳过；无版本号的候选（如
+                    # 用副标题区分的 god of war ragnarok）保留，交给匹配打分区分
+                    if cv and in_versions.isdisjoint(cv):
+                        continue
+                add(canon)
+
+    expand_seed(kw)
+    for v in _subjectless_variants(kw):
+        add(v)            # 变体原文本身也可直接匹配库中同名
+        expand_seed(v)    # 变体再走俗称映射（如 r6 → siege）
     return candidates
 
 
@@ -336,7 +380,7 @@ def _content_tokens(s: str) -> set:
     "astrbot_plugin_PlayStationGames",
     "Eason4869",
     "PlayStation玩家数据 — 绑定PSN账号，查询游戏库/游戏时间/奖杯、群内排行与对比（图片可视化）",
-    "1.4.0",
+    "1.4.1",
     "https://github.com/Eason4869/astrbot_plugin_PlayStationGames",
 )
 class PlayStationGamesPlugin(Star):
@@ -1190,7 +1234,9 @@ class PlayStationGamesPlugin(Star):
             return 150 + len(k)
         return 0
 
-    async def _find_game(self, online_id: str, keyword: str, assist: bool = False):
+    async def _find_game(
+        self, online_id: str, keyword: str, assist: bool = False, phrase: str = ""
+    ):
         """在用户游戏库中按关键词查找游戏，合并奖杯信息。
 
         Args:
@@ -1198,6 +1244,7 @@ class PlayStationGamesPlugin(Star):
             keyword: 搜索关键词。
             assist: 是否允许在确定性匹配失败时借助 LLM 从真实游戏库里重新判定目标
                 （仅自然语言路径使用，受 nl_llm_assist 配置控制；指令路径保持确定性）。
+            phrase: 用户的原始说法（可选），传给 LLM 作更完整的语境。
 
         Returns:
             (title_dict, trophy_dict_or_None, all_titles)；未找到时 title_dict 为 None。
@@ -1226,9 +1273,11 @@ class PlayStationGamesPlugin(Star):
                 scored.append((best_score, t))
         if not scored:
             # 确定性匹配失败：若允许 LLM 辅助（自然语言路径），让模型从真实游戏库里
-            # 判定用户最可能指的那款（如口语/俗称/别名的变体）。
+            # 判定用户最可能指的那款（如不在预置名单里的小众口语/俗称/别名变体）。
             if assist:
-                llm_pick = await self._pick_game_from_titles(online_id, keyword, titles)
+                llm_pick = await self._pick_game_from_titles(
+                    online_id, phrase or keyword, titles
+                )
                 if llm_pick:
                     scored = [(1, llm_pick)]  # 直接采纳 LLM 判定
 
@@ -1312,7 +1361,7 @@ class PlayStationGamesPlugin(Star):
         return None
 
     async def _do_game(
-        self, online_id: str, keyword: str, assist: bool = False
+        self, online_id: str, keyword: str, assist: bool = False, phrase: str = ""
     ) -> Tuple[Optional[str], Optional[str]]:
         """查询指定游戏详情，返回 (图片路径, 错误信息)。
 
@@ -1320,6 +1369,8 @@ class PlayStationGamesPlugin(Star):
             online_id: PSN 在线 ID。
             keyword: 游戏名关键词。
             assist: 是否允许 LLM 辅助再匹配（仅自然语言路径使用）。
+            phrase: 用户的原始说法/描述（可选）。LLM 辅助时会带上更完整的语境，
+                帮助识别不在预置俗称名单里的小众/口语表述；普通调用不传即为 keyword。
         """
         client = await self._get_client()
         keyword = (keyword or "").strip()
@@ -1327,7 +1378,9 @@ class PlayStationGamesPlugin(Star):
             return None, "请告诉我想查询的游戏名称，例如「查询 艾尔登法环 的游戏信息」。"
 
         try:
-            title, trophy, suggestions = await self._find_game(online_id, keyword, assist=assist)
+            title, trophy, suggestions = await self._find_game(
+                online_id, keyword, assist=assist, phrase=phrase or keyword
+            )
         except PSNAuthError as e:
             return None, f"PSN 认证失败：{e}\n请重新获取 NPSSO 令牌并更新配置。"
         except PSNNotFound as e:
@@ -2289,7 +2342,9 @@ class PlayStationGamesPlugin(Star):
                     yield finish(event.plain_result("请告诉我想查询的游戏名称，例如「查 艾尔登法环 的游戏信息」。"))
                     return
                 wait_id = await self._send_progress(event, f"正在查找 {online_id} 的游戏「{keyword}」...")
-                img_url, err = await self._do_game(online_id, keyword, assist=self.nl_llm_assist)
+                img_url, err = await self._do_game(
+                    online_id, keyword, assist=self.nl_llm_assist, phrase=game_text
+                )
                 await self._recall_message(event, wait_id)
                 yield finish(event.plain_result(err) if err else event.image_result(img_url))
                 return
