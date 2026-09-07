@@ -1,3 +1,8 @@
+<div align="center">
+
+![:name](https://count.getloli.com/@astrbot_plugin_PlayStationGames?name=astrbot_plugin_PlayStationGames&theme=minecraft&padding=6&offset=0&align=top&scale=1&pixelated=1&darkmode=auto)
+
+
 # 🎮 astrbot_plugin_PlayStationGames
 
 > AstrBot 的 PlayStation Network (PSN) 玩家数据可视化插件。
