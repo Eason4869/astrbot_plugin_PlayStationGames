@@ -5,6 +5,8 @@
 
 # 🎮 astrbot_plugin_PlayStationGames
 
+</div>
+
 > AstrBot 的 PlayStation Network (PSN) 玩家数据可视化插件。
 > 支持按群启用、绑定 PSN 账号、查询游戏库 / 游戏时间 / 奖杯、群内排行与对比，所有结果均以**图片**形式返回。
 
