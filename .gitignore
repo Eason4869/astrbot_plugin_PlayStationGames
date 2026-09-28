@@ -4,6 +4,8 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+.pytest_cache/
+dist/
 
 # Plugin runtime data (generated at runtime, do not commit)
 data/

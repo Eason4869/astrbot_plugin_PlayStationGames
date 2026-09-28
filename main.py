@@ -380,7 +380,7 @@ def _content_tokens(s: str) -> set:
     "astrbot_plugin_PlayStationGames",
     "Eason4869",
     "PlayStation玩家数据 — 绑定PSN账号，查询游戏库/游戏时间/奖杯、群内排行与对比（图片可视化）",
-    "1.4.1",
+    "1.4.2",
     "https://github.com/Eason4869/astrbot_plugin_PlayStationGames",
 )
 class PlayStationGamesPlugin(Star):
@@ -408,6 +408,7 @@ class PlayStationGamesPlugin(Star):
         # 配置里的初始白名单 + 运行时持久化的增删
         cfg_groups = self.config.get("enabled_groups", []) or []
         self._enabled_groups: set[str] = {str(g) for g in cfg_groups}
+        self._disabled_groups: set[str] = set()
         self._load_enabled_groups()
 
         # 绑定数据：users: {qq_id: online_id}; groups: {group_id: {qq_id: online_id}}
@@ -458,13 +459,17 @@ class PlayStationGamesPlugin(Star):
             data = json.loads(self.enabled_groups_file.read_text(encoding="utf-8"))
             for g in data.get("groups", []) or []:
                 self._enabled_groups.add(str(g))
+            self._disabled_groups.update(str(g) for g in data.get("disabled_groups", []) or [])
         except Exception as e:
             logger.error(f"[PSN] 读取启用群聊名单失败：{e}")
 
     def _save_enabled_groups(self) -> None:
         try:
             self.enabled_groups_file.write_text(
-                json.dumps({"groups": sorted(self._enabled_groups)}, ensure_ascii=False, indent=2),
+                json.dumps({
+                    "groups": sorted(self._enabled_groups),
+                    "disabled_groups": sorted(self._disabled_groups),
+                }, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
         except Exception as e:
@@ -508,7 +513,9 @@ class PlayStationGamesPlugin(Star):
                 return False
 
     def _group_enabled(self, group_id: Optional[str]) -> bool:
-        """群聊是否在白名单内。白名单为空表示不限制。"""
+        """群聊是否启用；禁用列表优先，白名单为空表示其余群均启用。"""
+        if group_id and str(group_id) in self._disabled_groups:
+            return False
         if not self._enabled_groups:
             return True
         if not group_id:
@@ -800,7 +807,6 @@ class PlayStationGamesPlugin(Star):
             options={
                 "width": width,
                 "full_page": True,
-                "omit_background": True,
                 "type": "jpeg",
                 "quality": self.image_quality,
             },
@@ -834,10 +840,12 @@ class PlayStationGamesPlugin(Star):
         if not gid:
             yield event.plain_result("请在群聊中使用该指令。")
             return
-        if gid in self._enabled_groups and not self.npsso_token:
+        if self._group_enabled(gid) and not self.npsso_token:
             yield event.plain_result("已在本群启用，但尚未配置 NPSSO 令牌。")
             return
-        self._enabled_groups.add(gid)
+        self._disabled_groups.discard(gid)
+        if self._enabled_groups:
+            self._enabled_groups.add(gid)
         self._save_enabled_groups()
         yield event.plain_result("✅ 已在本群启用 PSN 插件，使用 /psn帮助 查看指令。")
 
@@ -846,10 +854,12 @@ class PlayStationGamesPlugin(Star):
     async def cmd_disable(self, event: AstrMessageEvent):
         """管理员：在当前群禁用 PSN 插件。"""
         self._log_usage(event, "psn禁用")
-        gid = str(event.get_group_id())
-        if gid in self._enabled_groups:
-            self._enabled_groups.discard(gid)
-            self._save_enabled_groups()
+        gid = str(event.get_group_id() or "")
+        if not gid:
+            yield event.plain_result("请在群聊中使用该指令。")
+            return
+        self._disabled_groups.add(gid)
+        self._save_enabled_groups()
         yield event.plain_result("🚫 已在本群禁用 PSN 插件。")
 
     # -------------------- 帮助 --------------------
@@ -2044,7 +2054,7 @@ class PlayStationGamesPlugin(Star):
         ("compare",   ("对比", "比较", "比分", "和我谁", "跟我谁", "谁更肝", "谁厉害",
                        "battle", "vs", "比一比", "谁更强", "和谁比")),
         # 指定某款游戏（在「游戏库/奖杯」之前，且关键词要足够具体）
-        ("game",      ("游戏信息", "游戏详情", "游戏资料", "这个游戏", "该游戏",
+        ("game",      ("游戏信息", "游戏详情", "游戏资料", "奖杯进度", "这个游戏", "该游戏",
                        "这款游戏", "那款游戏", "游戏怎么样", "玩了多久",
                        "玩了多长", "玩了多少小时", "游戏进度", "玩了多久",
                        "游戏时长多少", "这个游戏玩了", "那款游戏玩了")),
@@ -2096,27 +2106,58 @@ class PlayStationGamesPlugin(Star):
         if not t:
             return None
         low = t.lower()
-        # 强相关词：PSN/PlayStation/奖杯/游戏库/排行/绑定 等
-        psn_hint = any(k in t for k in (
-            "psn", "playstation", "奖杯", "白金", "游戏库", "排行", "排名",
-            "绑定", "解绑", "联动", "游戏信息", "游戏详情", "游戏资料",
-            "游戏时长", "游戏进度", "玩了多久", "玩了多长", "玩了多少",
-            "游戏数量", "多少款游戏",
-        )) or "ps" in low
-        # 群功能词：在群聊中被 @ 时，这些也应识别为 PSN 请求
-        group_hint = any(k in t for k in (
-            "最肝", "谁在线", "谁在玩", "在线吗", "在线状态", "在玩啥",
-            "在玩什么", "对比", "比较", "比一比", "谁厉害", "游戏最多",
-            "玩得最多", "谁的游戏", "谁奖杯", "谁白金",
-        ))
-        game_hint = ("游戏" in t) or ("玩" in t and ("ps" in low or "游戏" in t))
-        if not (psn_hint or group_hint or game_hint):
+        explicit_psn = bool(re.search(r"(?<![a-z])(?:psn|play\s*station|ps[45])(?![a-z0-9])", low))
+        # 别的平台明确出现在当前消息里时，不把通用的“游戏库/奖杯”等词当成 PSN 请求。
+        if not explicit_psn and re.search(r"(?i)(?:steam|xbox|switch|epic|任天堂)", t):
             return None
+        group_scope = any(k in t for k in ("群里", "本群", "群友", "大家"))
+        personal_scope = any(k in t for k in ("我", "你", "他", "她", "@"))
+        query_scope = any(k in t for k in ("查", "看", "多少", "哪些", "什么", "情况", "进度", "统计", "信息", "详情"))
+        trophy_fragment = bool(re.fullmatch(r"我的奖杯[？?。]?", t))
+        game_scope = any(k in t for k in ("游戏", "游玩", "奖杯", "白金", "最肝", "玩了多久", "玩了多长"))
+        game_data_query = any(k in t for k in (
+            "游戏信息", "游戏详情", "游戏资料", "游戏进度", "玩了多久", "玩了多长",
+            "玩了多少小时", "游戏时长多少", "奖杯进度",
+        ))
+        named_game_trophy = "奖杯进度" in t and any(
+            alias.lower() in low for alias in GAME_ALIAS_KEYWORDS if len(alias) > 1
+        )
+        named_game_query = (
+            any(k in t for k in ("游戏信息", "游戏详情", "游戏资料"))
+            and not any(k in t for k in ("这个游戏", "该游戏", "这款游戏", "那款游戏"))
+        ) or bool(re.search(r"[\w\u4e00-\u9fff]{2,}玩了多(?:久|长)", t))
 
         for action, kws in self._INTENT_RULES:
             for kw in kws:
                 hit = (kw.lower() in low) if kw.isascii() else (kw in t)
                 if hit:
+                    if action in ("help", "sync", "unbind", "bind") and not explicit_psn:
+                        continue
+                    if action == "network" and not (explicit_psn or (group_scope and game_scope)):
+                        continue
+                    if action == "online" and not (explicit_psn or group_scope):
+                        continue
+                    if action == "ranking" and not (explicit_psn or (group_scope and game_scope)):
+                        continue
+                    if action == "compare" and not (explicit_psn or (game_scope and personal_scope)):
+                        continue
+                    if action == "game" and not (
+                        game_data_query and (
+                            named_game_trophy or (
+                                "奖杯进度" not in t
+                                and (explicit_psn or personal_scope or named_game_query)
+                            )
+                        )
+                    ):
+                        continue
+                    if action in ("trophies", "library") and not (
+                        explicit_psn or (personal_scope and query_scope and game_scope)
+                        or (query_scope and ("的奖杯" in t or "的游戏库" in t))
+                        or (action == "trophies" and trophy_fragment)
+                    ):
+                        continue
+                    if action == "profile" and not (explicit_psn or (personal_scope and game_scope)):
+                        continue
                     return action
         # 仅有泛泛的 "我的 psn" 但无明确动作 -> 视为个人资料
         if ("psn" in low or "playstation" in low) and any(
@@ -2185,7 +2226,7 @@ class PlayStationGamesPlugin(Star):
             r"(?:查一下|查下|查询|查|看看|看下|看一下|帮我看|帮我查|告诉我|想知道|请问|一下|"
             r"这个游戏|该游戏|这款游戏|那款游戏|这个|那款|的|游戏信息|游戏详情|游戏资料|"
             r"游戏时长|游戏时间|玩了多久|玩了多长时间|玩了多长|玩了多少小时|玩了多少个小时|"
-            r"游戏进度|游戏怎么样|怎么样|如何|是什么|叫什么|"
+            r"游戏进度|奖杯进度|白金进度|游戏怎么样|怎么样|如何|是什么|叫什么|"
             r"在|呢|吗|啊|呀|吧|哦|呗|嘛|么|时间|多长|多久|多少小时)",
         ]
         for pat in patterns:
@@ -2473,13 +2514,13 @@ class PlayStationGamesPlugin(Star):
                 return resp["id"]
         return getattr(resp, "message_id", None) or getattr(resp, "id", None)
 
-    # 用一个足够宽的正则挂载分发器：覆盖 PSN / PlayStation / 奖杯 / 游戏库 / 绑定 等。
+    # 入口只覆盖较明确的 PSN 数据词；更宽泛的游戏闲聊留给 Agent。
     # 是否真正命中由 _detect_intent 二次判定；不命中则不停止事件，正常交还给 LLM。
     @filter.regex(
         r"(?i)(psn|play\s*station|奖杯|白金杯?|游戏库|游戏信息|游戏详情|游戏资料|游戏时长|"
         r"游戏进度|玩了多久|玩了多长|游戏数量|多少款游戏|排行|排名|排行榜|"
         r"绑定|解绑|同步|联动|谁在线|谁在玩|在玩啥|在玩什么|在线吗|在线状态|"
-        r"对比|比较|比一比|最肝|肝|游戏|玩)"
+        r"对比|比较|比一比|最肝)"
     )
     async def on_natural_language(self, event: AstrMessageEvent):
         """自然语言入口：在 LLM/Agent 阶段之前确定性地处理 PSN 请求。"""
@@ -2514,6 +2555,13 @@ class PlayStationGamesPlugin(Star):
         if need_group and not event.get_group_id():
             return "该功能需要在群聊中使用。"
         return None
+
+    def _tool_request_allowed(self, event: AstrMessageEvent, action: str) -> bool:
+        """LLM 可能误选工具；只接受当前用户消息里对应的 PSN 请求。"""
+        try:
+            return self._detect_intent(event.get_message_str()) == action
+        except Exception:
+            return False
 
     async def _yield_tool_result(self, event: AstrMessageEvent, result):
         """LLM 工具统一出口：终止事件并产出一条结果。
@@ -2616,11 +2664,13 @@ class PlayStationGamesPlugin(Star):
 
     @filter.llm_tool(name="psn_query_profile")
     async def tool_query_profile(self, event: AstrMessageEvent, target: str = ""):
-        '''查询 PlayStation(PSN) 玩家的个人资料、在线状态和奖杯总览。当用户想查看某人或自己的 PSN 资料、在不在线、正在玩什么、奖杯等级时【必须实际调用本工具】。不要因历史对话里的失败说法而跳过调用。
+        '''仅在当前用户明确询问 PlayStation/PSN 玩家的资料、在线状态或奖杯等级时使用。不要用于其他平台或普通聊天。
 
         Args:
             target(string): 要查询的目标。用户查自己时留空或填"我"；否则填被 @ 者、对方的 QQ 号或 PSN 在线 ID。
         '''
+        if not self._tool_request_allowed(event, "profile"):
+            return
         err = self._tool_gate(event)
         if err:
             async for r in self._yield_tool_result(event, event.plain_result(err)):
@@ -2646,11 +2696,13 @@ class PlayStationGamesPlugin(Star):
 
     @filter.llm_tool(name="psn_query_library")
     async def tool_query_library(self, event: AstrMessageEvent, target: str = ""):
-        '''查询 PlayStation(PSN) 玩家的游戏库和游戏时长。当用户想看某人或自己玩过哪些游戏、总游戏时长、各平台游戏数量、游戏封面墙时【必须实际调用本工具】。不要因历史对话里的失败说法而跳过调用。
+        '''仅在当前用户询问 PlayStation/PSN 玩家的游戏库、总游戏时长或游戏数量时使用。不要用于其他平台的游戏库。
 
         Args:
             target(string): 要查询的目标。用户查自己时留空或填"我"；否则填被 @ 者、对方的 QQ 号或 PSN 在线 ID。
         '''
+        if not self._tool_request_allowed(event, "library"):
+            return
         err = self._tool_gate(event)
         if err:
             async for r in self._yield_tool_result(event, event.plain_result(err)):
@@ -2676,11 +2728,13 @@ class PlayStationGamesPlugin(Star):
 
     @filter.llm_tool(name="psn_query_trophies")
     async def tool_query_trophies(self, event: AstrMessageEvent, target: str = ""):
-        '''查询 PlayStation(PSN) 玩家的奖杯进度。当用户想看某人或自己各游戏的奖杯完成度、白金/金/银/铜奖杯进度时【必须实际调用本工具】。不要因历史对话里的失败说法而跳过调用。
+        '''仅在当前用户询问 PlayStation/PSN 玩家的奖杯进度时使用。不要把普通成就或现实奖杯话题当作 PSN 查询。
 
         Args:
             target(string): 要查询的目标。用户查自己时留空或填"我"；否则填被 @ 者、对方的 QQ 号或 PSN 在线 ID。
         '''
+        if not self._tool_request_allowed(event, "trophies"):
+            return
         err = self._tool_gate(event)
         if err:
             async for r in self._yield_tool_result(event, event.plain_result(err)):
@@ -2712,6 +2766,8 @@ class PlayStationGamesPlugin(Star):
             game_name(string): 要查询的游戏名称关键词（必填），例如"艾尔登法环""黑神话悟空""战神"。
             target(string): 可选，查谁的这款游戏。查用户自己时留空或填"我"；否则填被 @ 者、对方 QQ 号或 PSN 在线 ID。
         '''
+        if not self._tool_request_allowed(event, "game"):
+            return
         err = self._tool_gate(event)
         if err:
             async for r in self._yield_tool_result(event, event.plain_result(err)):
@@ -2744,11 +2800,13 @@ class PlayStationGamesPlugin(Star):
 
     @filter.llm_tool(name="psn_ranking")
     async def tool_ranking(self, event: AstrMessageEvent, dimension: str = "时长"):
-        '''查看当前群聊的 PlayStation(PSN) 排行榜。当用户说群排行、谁最肝、谁游戏最多、谁奖杯多、谁白金多时【必须实际调用本工具】。不要因历史对话里的失败说法而跳过调用。
+        '''仅在当前用户询问群内 PlayStation/PSN 玩家的游戏时长、游戏数或奖杯排行时使用。不要用于其他排行榜。
 
         Args:
             dimension(string): 排行维度，可选值："时长"(游戏时长/肝度，默认)、"游戏数"(游戏数量)、"奖杯"(奖杯总分)、"白金"(白金杯数量)。无法判断时填"时长"。
         '''
+        if not self._tool_request_allowed(event, "ranking"):
+            return
         err = self._tool_gate(event, need_group=True)
         if err:
             async for r in self._yield_tool_result(event, event.plain_result(err)):
@@ -2773,11 +2831,13 @@ class PlayStationGamesPlugin(Star):
 
     @filter.llm_tool(name="psn_compare")
     async def tool_compare(self, event: AstrMessageEvent, target: str = ""):
-        '''把用户自己与另一位 PlayStation(PSN) 玩家做对比，比较游戏数量、总时长、奖杯、白金数及共同游戏。当用户要求和某人对比/比较 PSN 数据时【必须实际调用本工具】。
+        '''仅在当前用户要求与另一位 PlayStation/PSN 玩家比较游戏数量、时长或奖杯时使用。
 
         Args:
             target(string): 对比对象，通常是被 @ 的人、对方的 QQ 号或 PSN 在线 ID。
         '''
+        if not self._tool_request_allowed(event, "compare"):
+            return
         err = self._tool_gate(event)
         if err:
             async for r in self._yield_tool_result(event, event.plain_result(err)):
@@ -2816,7 +2876,9 @@ class PlayStationGamesPlugin(Star):
 
     @filter.llm_tool(name="psn_online")
     async def tool_online(self, event: AstrMessageEvent):
-        '''查看当前群聊里哪些 PlayStation(PSN) 玩家在线、正在玩什么游戏。当用户问"群里谁在线""现在有人在玩什么吗"时【必须实际调用本工具】。不要因历史对话里的失败说法而跳过调用。'''
+        '''仅在当前用户询问群内 PlayStation/PSN 玩家在线状态或正在玩的游戏时使用。'''
+        if not self._tool_request_allowed(event, "online"):
+            return
         err = self._tool_gate(event, need_group=True)
         if err:
             async for r in self._yield_tool_result(event, event.plain_result(err)):
@@ -2843,6 +2905,8 @@ class PlayStationGamesPlugin(Star):
         Args:
             online_id(string): 用户提供的 PSN 在线 ID（必填）。若用户只是问怎么绑定而没给 ID，则留空。
         '''
+        if not self._tool_request_allowed(event, "bind"):
+            return
         err = self._tool_gate(event)
         if err:
             async for r in self._yield_tool_result(event, event.plain_result(err)):

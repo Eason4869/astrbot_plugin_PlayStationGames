@@ -29,7 +29,7 @@ Inspired by: [astrbot_plugin_steam_status_monitor](https://github.com/Maoer233/a
    - `/psn在线` — who is online in the group and what they are playing.
 7. **Visualized image output** — all data is rendered as clean dark-style images via AstrBot’s HTML-rendering capability.
 8. **Cache & logging** — built-in in-memory cache reduces PSN requests; usage is written to `usage.log` in the data directory.
-9. **💬 Natural language (deterministic-first, optional LLM assist)** — just @ the bot and say things like “check my trophies”, “who is the grindiest in the group”, “what is @someone playing”. Natural-language intent is recognized **deterministically at the plugin layer** (`@filter.regex`), running **before** the Agent/LLM stage, so it does not require a chat-capable LLM and is unaffected by Agent-hijacking plugins like `memory_companion` / `private_companion`. When deterministic recognition is ambiguous, an optional switch `nl_llm_assist` (default on) calls the configured LLM once for semantic disambiguation and fuzzy re-matching; the LLM function-calling tools (`@filter.llm_tool`) are also still registered as a fallback.
+9. **💬 Natural language (deterministic-first, optional LLM assist)** — just @ the bot and ask about PSN trophies, a group PSN ranking, or a named game's play time. Intent is recognized **deterministically at the plugin layer** (`@filter.regex`) before the Agent/LLM stage. If a recognized single-game query cannot match a title, `nl_llm_assist` (default on) can ask the configured LLM to choose from the first 60 library titles. LLM function-calling tools (`@filter.llm_tool`) remain registered as a fallback.
 
 ---
 
@@ -53,16 +53,19 @@ Search `astrbot_plugin_PlayStationGames` in the "Plugin Market" of the AstrBot d
 
 ### Option 2: Manual install
 
+Download `astrbot_plugin_PlayStationGames-1.4.2.zip` from [Releases](https://github.com/Eason4869/astrbot_plugin_PlayStationGames/releases), extract it, and place the `astrbot_plugin_PlayStationGames` folder under AstrBot's `data/plugins/` directory. Alternatively, use Git:
+
 ```bash
-# Inside AstrBot's plugins directory
-cd plugins
+# Inside AstrBot's data/plugins directory
+cd data/plugins
 git clone https://github.com/Eason4869/astrbot_plugin_PlayStationGames.git
 ```
 
-Then restart / reload the plugin in the AstrBot dashboard; the plugin auto-installs its dependencies:
+To upgrade, use Update in the Plugin Market or run `git pull` in the Git installation directory, then reload the plugin in the AstrBot dashboard. Existing bindings and group settings in `data/plugin_data/astrbot_plugin_PlayStationGames/` are retained. The plugin auto-installs its dependencies:
 
 - [`PSNAWP`](https://github.com/isFakeAccount/psnawp) — unofficial Python API wrapper for PSN;
-- `aiohttp` — async downloads of covers/avatars.
+- `aiohttp` — async downloads of covers/avatars;
+- `requests` — detection and retry of PSN network errors.
 
 > If auto-install fails, run manually inside the plugin directory:
 > ```bash
@@ -102,9 +105,9 @@ Editable from the plugin config page in the AstrBot dashboard:
 | `cache_ttl`    | Cache TTL (seconds) for profile/library/trophy data | `300` |
 | `max_titles`   | Max games counted for library/leaderboard | `200` |
 | `command_prefix` | Command prefix (display only; commands already use `prefix_optional`) | `/` |
-| `nl_llm_assist` | When deterministic recognition finds no match, call LLM assist to disambiguate (e.g. pick a game from the real library, or identify an un-@-mentioned member). Set `false` to use deterministic rules only (faster, but vaguer phrasings may fail) | `true` |
+| `nl_llm_assist` | If a recognized single-game query fails deterministic title matching, ask the LLM to choose from the first 60 library titles. It does not recognize intent or un-@-mentioned members. | `true` |
 
-Groups added at runtime via admin commands are persisted to `enabled_groups.json` in the data dir and merged with the config list.
+Admin `/psn禁用` persists a group in `enabled_groups.json` under `disabled_groups`, overriding the configured allowlist. `/psn启用` removes that block. With an empty allowlist, every other group remains enabled.
 
 ---
 
@@ -144,31 +147,31 @@ The plugin supports daily conversational queries — **no need to memorize comma
 
 - ✅ **No chat-capable LLM is required** (just @ the bot / DM-wake it); recognition relies primarily on deterministic rules — fast and stable;
 - ✅ **Unaffected by other Agent plugins** — even if `memory_companion`, `private_companion` or similar conversation-hijacking plugins are installed, PSN requests are handled and their event terminated by this plugin *before* reaching them, so you won’t get the “LLM didn’t call the tool / API is broken” issue;
-- 💡 **Optional LLM assist**: when deterministic recognition can’t pin down the target/game (e.g. an obscure colloquial name), turn on `nl_llm_assist` — the plugin calls the configured ChatGPT-class provider once for a **concise semantic decision** (e.g. pick the most likely game from your real library). Failures don’t affect usage — it falls back to deterministic results; disable it in config if you want zero LLM traffic;
+- 💡 **Optional LLM assist**: when a recognized single-game query cannot match a title, `nl_llm_assist` asks the configured provider to choose from the first 60 library titles. Failures fall back to deterministic results. Member nicknames are resolved from the group roster instead;
 - The **function-calling tools (`@filter.llm_tool`)** are also registered as a fallback.
 
 Examples (just @ the bot and say — the examples use Chinese phrasings, shown with rough translations):
 
-- 「查一下我的 PSN 资料」(check my PSN profile) / 「我在玩什么？」(what am I playing?)
-- 「@某人 现在在玩什么游戏？」(what is @someone playing?)
+- 「查一下我的 PSN 资料」(check my PSN profile) / 「我的 PSN 现在在玩什么？」(what am I playing on PSN?)
+- 「@某人 的 PSN 现在在玩什么游戏？」(what is @someone playing on PSN?)
 - 「看看我的奖杯」(look at my trophies) / 「我的游戏库有哪些？」(what’s in my library?)
 - 「**我大镖客2玩了多久？**/ **我r6玩了多久**」— a leading “我” glued to the game name is automatically trimmed, so it searches “Red Dead Redemption 2”/“r6” (“我r6” → “r6” → Rainbow Six Siege) / 「**老头环的游戏信息**」(Elden Ring info) / 「**战神5奖杯进度**」(GoW Ragnarök trophy progress)
 - 「**@小明 艾尔登法环玩了多久？**」(how long has @XiaoMing played Elden Ring — queries @XiaoMing’s game) / 「@小明 的游戏库」(Zhang Xiaoming’s library) / 「@小明 奖杯进度」(…trophies)
-- 「**看看 小明 的奖杯**」(check Xiaoming’s trophies — @ not required: on platforms that expose the member list the member is identified by group nickname) / 「大镖客2 老头环进度」
-- 「群里谁最肝？」(who’s the grindiest in the group) / 「本群游戏时长排行」/「谁的白金多？」
+- 「**看看 小明 的奖杯**」(check Xiaoming’s trophies — @ not required on platforms that expose the member list)
+- 「群里谁最肝？」(who’s the grindiest in the group) / 「本群游戏时长排行」/「群里谁的白金多？」
 - 「我和 @某人 谁的奖杯多？」(who has more trophies, me or @someone?)
 - 「现在群里谁在线？」(who is online now?)
 - 「我想绑定 PSN，ID 是 XiaoMing」(I want to bind PSN, ID is XiaoMing)
 
 Anyone who is @-mentioned is auto-recognized as the query target (they must be bound); if not @-mentioned but you typed their name/nickname, the plugin tries to resolve them by the group nickname (most reliable when the typed name matches the actual nickname).
 
-> Tip: deterministic keywords are the backbone, so clear phrasing works best; vaguer/more colloquial phrasing gets one LLM semantic-decision chance when `nl_llm_assist` is on (default), and if that still misses it is passed back to the LLM (if you have a chat model configured) — otherwise just use an explicit `/psn…` command. Binding/unbinding can also be done via natural language.
+> Tip: generic words such as “bind”, “compare”, “online”, or “how is this game” do not by themselves trigger a PSN query. Mention PSN or ask a specific game-data question. Binding/unbinding in natural language must mention PSN. If the phrasing is ambiguous, use an explicit `/psn…` command.
 
 **🤔 How do I search a niche game nickname that isn’t in the preset list?**
 Fuzzy matching does not rely on a fixed “all titles on the internet” table. It falls back through three layers, getting smarter at each:
 1. **Alias table (`GAME_ALIAS_KEYWORDS`) + strong fuzzy match**: it first matches your phrasing (including variants with the leading subject removed) against the list of games **you actually own**. As long as the game is in your library, it usually hits via Chinese/English name, substring, or content-token similarity;
 2. **Your real library is the source of truth**: whether a match succeeds ultimately depends on the games **you actually own**, not on some pre-recorded “global game list” — so any game you’ve played is covered;
-3. **Optional LLM decision**: if nothing above matched, it asks the configured LLM once with the *full original wording* (`nl_llm_assist=on`) to pick the closest title from your real library — this covers arbitrary colloquial/niche nicknames with no pre-registration needed.
+3. **Optional LLM decision**: when a recognized single-game query fails deterministic matching, the configured LLM receives the original wording and chooses among the first 60 library titles (sorted by play time). Titles outside that set are not considered in this step.
 
 If you want a particular phrase to work even better up front, the simplest is to tell the author to add that nickname into the first `GAME_ALIAS_KEYWORDS` layer (we can always add it), but layers 1 and 3 usually suffice.
 
@@ -176,12 +179,12 @@ If you want a particular phrase to work even better up front, the simplest is to
 
 ## 🗂️ Data storage
 
-Plugin data is stored under AstrBot’s data directory (usually `data/astrbot_plugin_PlayStationGames/`):
+The plugin uses `StarTools.get_data_dir()` for storage, usually under `data/plugin_data/astrbot_plugin_PlayStationGames/`:
 
 ```
-data/astrbot_plugin_PlayStationGames/
+data/plugin_data/astrbot_plugin_PlayStationGames/
 ├── psn_bindings.json      # user bindings & group-member mapping
-├── enabled_groups.json    # groups enabled at runtime
+├── enabled_groups.json    # groups enabled or disabled at runtime
 ├── usage.log              # command usage log
 └── image_cache/           # avatar / game-cover cache
 ```

@@ -37,7 +37,7 @@
    - `/psn在线`：群内谁在线、正在玩什么游戏。
 7. **可视化图片输出**：所有数据均使用 AstrBot 的 HTML 渲染能力生成精美深色风格图片。
 8. **缓存与日志**：内置内存缓存减少 PSN 请求；使用情况写入数据目录下的 `usage.log`。
-9. **💬 自然语言支持（确定性为主、可选 LLM 辅助）**：直接 @机器人 说「查下我的奖杯」「群里谁最肝」「看看 @某人 在玩什么」「我大镖客2玩了多久」「和 @某人 对比一下」即可触发。自然语言意图先在**插件层确定性识别**（`@filter.regex`），运行在 Agent/LLM 阶段之前，因此不强制依赖 LLM 就能用，且不受 `memory_companion`、`private_companion` 等接管 Agent 的插件干扰；确定性识别不清时（可选开关 `nl_llm_assist`，默认开启）会调用一次已配置的 LLM 进行语义纠偏与模糊游戏再匹配，同时保留 LLM 函数调用（`@filter.llm_tool`）作为兜底。
+9. **💬 自然语言支持（确定性为主、可选 LLM 辅助）**：直接 @机器人 说「查下我的奖杯」「群里谁最肝」「看看 @某人 的 PSN 在线状态」「我大镖客2玩了多久」「和 @某人 对比 PSN 奖杯」即可触发。自然语言意图先在**插件层确定性识别**（`@filter.regex`），运行在 Agent/LLM 阶段之前，因此不强制依赖 LLM 就能用，且不受 `memory_companion`、`private_companion` 等接管 Agent 的插件干扰；单款游戏名称匹配失败时，可选开关 `nl_llm_assist`（默认开启）会调用一次已配置的 LLM 从游戏库中挑选候选，同时保留 LLM 函数调用（`@filter.llm_tool`）作为兜底。
 
 ---
 
@@ -61,16 +61,19 @@
 
 ### 方式二：手动安装
 
+可从 [Releases](https://github.com/Eason4869/astrbot_plugin_PlayStationGames/releases) 下载 `astrbot_plugin_PlayStationGames-1.4.2.zip`，解压后将其中的 `astrbot_plugin_PlayStationGames` 文件夹放入 AstrBot 的 `data/plugins/` 目录；也可使用 Git：
+
 ```bash
-# 在 AstrBot 的 plugins 目录下
-cd plugins
+# 在 AstrBot 的 data/plugins 目录下
+cd data/plugins
 git clone https://github.com/Eason4869/astrbot_plugin_PlayStationGames.git
 ```
 
-随后在 AstrBot 面板中重启 / 重载插件，插件会自动安装依赖：
+升级时在插件市场点击更新，或在 Git 安装目录执行 `git pull`，然后在 AstrBot 面板重载插件。升级不会清除 `data/plugin_data/astrbot_plugin_PlayStationGames/` 中的绑定和群开关数据。插件会自动安装依赖：
 
 - [`PSNAWP`](https://github.com/isFakeAccount/psnawp) —— PSN 的非官方 Python API 封装；
-- `aiohttp` —— 异步下载封面/头像。
+- `aiohttp` —— 异步下载封面/头像；
+- `requests` —— PSN 网络错误识别与重试。
 
 > 如果自动安装失败，请在插件目录手动执行：
 > ```bash
@@ -110,9 +113,9 @@ git clone https://github.com/Eason4869/astrbot_plugin_PlayStationGames.git
 | `cache_ttl` | 个人/游戏库/奖杯数据的缓存时间（秒） | `300` |
 | `max_titles` | 游戏库/排行最多统计的游戏数量 | `200` |
 | `command_prefix` | 指令前缀（仅作展示用，指令已开启 `prefix_optional`） | `/` |
-| `nl_llm_assist` | 自然语言识别在确定性匹配不到时，是否调用 LLM 辅助纠偏（如从真实游戏库判定某游戏、识别没 @ 的群友）。为 `false` 时只用确定性规则，更快但更模糊的问法可能失败 | `true` |
+| `nl_llm_assist` | 单款游戏查询匹配失败时，是否让 LLM 从游戏库前 60 项中选候选；不负责识别意图或未 @ 的群友 | `true` |
 
-运行期通过管理员指令添加的群聊会保存到数据目录 `enabled_groups.json`，与配置名单合并生效。
+运行期管理员执行 `/psn禁用` 的群会记录在数据目录 `enabled_groups.json` 的 `disabled_groups` 中，并覆盖配置白名单；`/psn启用` 会取消该群的禁用。白名单为空时，除已禁用的群外，其余群仍可使用。
 
 ---
 
@@ -152,31 +155,31 @@ git clone https://github.com/Eason4869/astrbot_plugin_PlayStationGames.git
 
 - ✅ **不强制要求给机器人配好“能聊天”的 LLM 也能用**（只要 @ 机器人 / 私聊唤醒）；语义识别以确定性规则为主，速度快、结果稳定；
 - ✅ **不受其他 Agent 类插件干扰**——即使同时安装了 `memory_companion`、`private_companion` 等会接管对话的插件，PSN 请求也会在进入它们之前被本插件直接处理并终止事件，不会出现「LLM 不调用工具、直接回接口有问题」的情况；
-- 💡 **可选 LLM 辅助**：当确定性识别无法确定目标/游戏（例如用很偏的口语、俗称指代某个游戏），可开启 `nl_llm_assist`——插件会调用当前已配置的 ChatGPT 类提供商做一次**精简的语义判定**（如从你的真实游戏库里挑出最可能指的那款）。失败也不影响使用，自动回退到确定性结果；不想要任何 LLM 流量就在配置里关掉该项；
+- 💡 **可选 LLM 辅助**：已识别为单款游戏查询、但确定性匹配没找到游戏时，`nl_llm_assist` 可让当前 LLM 从游戏库前 60 项中选候选。失败会回退；关闭该项可避免这一路额外 LLM 调用。群昵称仍按群名册确定性识别；
 - 同时仍注册了一组 **函数调用工具（`@filter.llm_tool`）** 作为兜底。
 
 示例（直接 @机器人 说）：
 
-- 「查一下我的 PSN 资料」/「我在玩什么？」
-- 「@某人 现在在玩什么游戏？」
+- 「查一下我的 PSN 资料」/「我的 PSN 现在在玩什么？」
+- 「@某人 的 PSN 现在在玩什么游戏？」
 - 「看看我的奖杯」/「我的游戏库有哪些？」
 - 「**我大镖客2玩了多久？**」/「**我r6玩了多久**」（句首「我」与游戏名粘连也会被自动剔除：会先试着把关键词还原成「大镖客2」「r6」再搜）/「**老头环的游戏信息**」/「**战神5奖杯进度**」
 - 「**@小明 艾尔登法环玩了多久？**」（查 **@小明** 的这款游戏）/「@小明 的游戏库」/「@小明 奖杯进度」
-- 「**看看 小明 的奖杯**」（没 @ 也行：在支持群名册的平台上会按群昵称识别出“小明”再查询）/「**大镖客2 老头环进度**」
-- 「群里谁最肝？」/「本群游戏时长排行」/「谁的白金多？」
+- 「**看看 小明 的奖杯**」（没 @ 也行：在支持群名册的平台上会按群昵称识别出“小明”再查询）
+- 「群里谁最肝？」/「本群游戏时长排行」/「群里谁的白金多？」
 - 「我和 @某人 谁的奖杯多？」
 - 「现在群里谁在线？」
 - 「我想绑定 PSN，ID 是 XiaoMing」
 
 被 @ 的人会被自动识别为查询目标（同样要求 TA 已绑定）；未 @ 但直接写了对方昵称/名字时，会尽量按群昵称识别（对手动输入昵称与实际昵称一致的情况最可靠）。
 
-> 提示：意图识别以确定性关键词为骨架，措辞清晰最可靠；更口语、更模糊的说法在开启 `nl_llm_assist`（默认开启）时会给一次 LLM 语义判定机会，仍未命中则交还 LLM（若配了能聊天的模型）或直接用 `/psn` 等指令最稳妥。绑定/解绑等操作也可直接用自然语言完成。
+> 提示：通用词如「绑定」「对比」「在线」「游戏怎么样」不会单独触发 PSN 查询；请带上「PSN」或明确的游戏数据问题。意图识别以确定性关键词为骨架；未识别出的问法会交还聊天 LLM，`nl_llm_assist` 不负责意图识别。直接用 `/psn` 等指令最稳妥。绑定/解绑等操作也可直接用自然语言完成，但需明确提到 PSN。
 
 **🤔 一个小众游戏的俗称不在“预置名单”里，怎么搜？**
 模糊匹配并不是靠一张写死的俗称表，而是按下面三层兜底，越往后越“懂行”：
 1. **别名/俗称表（`GAME_ALIAS_KEYWORDS`）+ 强模糊匹配**：先按你的说法（含去掉主语后的变体）去命中你**真实拥有的游戏列表**；只要你的库里有这款，多数情况下靠「中文名/英文名/子串/内容词」相似度就能命中；
 2. **真实游戏库为准**：能命中与否最终看的是**你实际拥有的那批游戏**，而不是某个“全网游戏名单”——所以任意一款玩过的游戏都覆盖得到；
-3. **可选 LLM 判定**：以上都没命中时会带*完整原文*问一次当前 LLM（`nl_llm_assist=开`），让它从你真实库里挑最像的那款——这就能覆盖任意口语/生僻俗称，无需预先收录。
+3. **可选 LLM 判定**：单款游戏查询已识别，但确定性匹配未命中时，会带原文问一次当前 LLM（`nl_llm_assist=开`），从按时长排序的游戏库前 60 项中挑候选；超出该范围的游戏不会参与这一步。
 
 如果你希望某句开头更好用，最简单是告诉作者把该俗称加进 `GAME_ALIAS_KEYWORDS` 第一层即可（我们随时能补），但正常情况下第 1、3 层已经够用。
 
@@ -184,12 +187,12 @@ git clone https://github.com/Eason4869/astrbot_plugin_PlayStationGames.git
 
 ## 🗂️ 数据存储
 
-插件数据保存在 AstrBot 的数据目录下（通常是 `data/astrbot_plugin_PlayStationGames/`）：
+插件通过 `StarTools.get_data_dir()` 保存数据，通常位于 `data/plugin_data/astrbot_plugin_PlayStationGames/`：
 
 ```
-data/astrbot_plugin_PlayStationGames/
+data/plugin_data/astrbot_plugin_PlayStationGames/
 ├── psn_bindings.json      # 用户绑定与群成员映射
-├── enabled_groups.json    # 运行时增删的启用群聊
+├── enabled_groups.json    # 运行时启用/禁用的群聊
 ├── usage.log              # 指令使用日志
 └── image_cache/           # 头像、游戏封面缓存
 ```

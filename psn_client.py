@@ -12,6 +12,16 @@ import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+try:
+    from requests.exceptions import ConnectionError as RequestsConnectionError
+    from requests.exceptions import Timeout as RequestsTimeout
+except ImportError:  # PSNAWP 尚未安装时保留插件的友好依赖提示
+    class RequestsConnectionError(Exception):
+        pass
+
+    class RequestsTimeout(Exception):
+        pass
+
 try:  # 延迟导入，便于在未安装 PSNAWP 的环境中给出清晰提示
     from psnawp_api import PSNAWP
     from psnawp_api.core.psnawp_exceptions import (
@@ -24,9 +34,14 @@ try:  # 延迟导入，便于在未安装 PSNAWP 的环境中给出清晰提示
     _PSNAWP_IMPORT_ERROR = None
 except Exception as _e:  # pragma: no cover - 仅在依赖缺失时触发
     PSNAWP = None  # type: ignore
-    PSNAWPAuthenticationError = Exception  # type: ignore
-    PSNAWPForbiddenError = Exception  # type: ignore
-    PSNAWPNotFoundError = Exception  # type: ignore
+    class PSNAWPAuthenticationError(Exception):  # type: ignore
+        pass
+
+    class PSNAWPForbiddenError(Exception):  # type: ignore
+        pass
+
+    class PSNAWPNotFoundError(Exception):  # type: ignore
+        pass
     _PSNAWP_AVAILABLE = False
     _PSNAWP_IMPORT_ERROR = _e
 
@@ -152,26 +167,34 @@ class PSNClient:
     async def _run(self, func, *args, **kwargs):
         """在独立线程中执行同步的 PSNAWP 调用，并统一异常。"""
         async with self._call_lock:
-            loop = asyncio.get_event_loop()
-            try:
-                return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
-            except PSNAWPAuthenticationError as e:
-                # token 可能过期，重置以便下次重建
-                self._psnawp = None
-                raise PSNAuthError(f"NPSSO 令牌无效或已过期：{e}") from e
-            except PSNAWPNotFoundError as e:
-                raise PSNNotFound(f"未找到：{e}") from e
-            except PSNAWPForbiddenError as e:
-                raise PSNForbidden(f"资料私密或无权访问：{e}") from e
-            except PSNClientError:
-                raise
-            except Exception as e:
-                # PSNAWP 较新版本可能对不同错误使用 requests 包装，识别常见文本
-                text = str(e).lower()
-                if "401" in text or ("403" in text and "token" in text) or "npsso" in text:
+            loop = asyncio.get_running_loop()
+            for attempt in range(3):
+                try:
+                    return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
+                except (ConnectionError, TimeoutError, RequestsConnectionError, RequestsTimeout) as e:
+                    if attempt < 2:
+                        delay = 0.5 * (2 ** attempt)
+                        self._log("warning", f"PSN 网络请求失败，{delay} 秒后重试 ({attempt + 1}/2)：{e}")
+                        await asyncio.sleep(delay)
+                        continue
+                    raise PSNClientError(f"PSN 请求异常（重试后仍失败）：{e}") from e
+                except PSNAWPAuthenticationError as e:
+                    # token 可能过期，重置以便下次重建
                     self._psnawp = None
-                    raise PSNAuthError(f"认证失败，请检查/更新 NPSSO：{e}") from e
-                raise PSNClientError(f"PSN 请求异常：{e}") from e
+                    raise PSNAuthError(f"NPSSO 令牌无效或已过期：{e}") from e
+                except PSNAWPNotFoundError as e:
+                    raise PSNNotFound(f"未找到：{e}") from e
+                except PSNAWPForbiddenError as e:
+                    raise PSNForbidden(f"资料私密或无权访问：{e}") from e
+                except PSNClientError:
+                    raise
+                except Exception as e:
+                    # PSNAWP 较新版本可能对不同错误使用 requests 包装，识别常见文本
+                    text = str(e).lower()
+                    if "401" in text or ("403" in text and "token" in text) or "npsso" in text:
+                        self._psnawp = None
+                        raise PSNAuthError(f"认证失败，请检查/更新 NPSSO：{e}") from e
+                    raise PSNClientError(f"PSN 请求异常：{e}") from e
 
     def _cache_get(self, key: str) -> Any:
         item = self._cache.get(key)
